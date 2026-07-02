@@ -164,10 +164,10 @@
       <h2>視野欠損レベルを選択して測定点をタップ</h2>
       <div class="palette" id="palette">
         <button class="pal-0" data-level="0">レベル0<small>25dB以上・正常</small></button>
-        <button class="pal-1" data-level="1">レベル1<small>20〜24dB・軽度</small></button>
-        <button class="pal-2" data-level="2">レベル2<small>15〜19dB・中度</small></button>
-        <button class="pal-3" data-level="3">レベル3<small>10〜14dB・高度</small></button>
-        <button class="pal-4" data-level="4">レベル4<small>10dB未満・重篤</small></button>
+        <button class="pal-1" data-level="1">レベル1<small>15〜24dB・軽度</small></button>
+        <button class="pal-2" data-level="2">レベル2<small>5〜14dB・中等度</small></button>
+        <button class="pal-3" data-level="3">レベル3<small>0〜5dB・強度</small></button>
+        <button class="pal-4" data-level="4">レベル4<small>0dB以下・真っ暗</small></button>
       </div>
       <p class="hint">点をタップまたはドラッグ（なぞる）で選択中のレベルを適用します。両眼重ね合わせ視野を入力してください。</p>
     </div>
@@ -266,34 +266,35 @@ const STANDARD_POINTS = [
 ];
 
 const LEVEL_COLORS = ["#2e7d32", "#f9a825", "#ef6c00", "#c62828", "#212121"];
-const LEVEL_DB     = [32, 22, 17, 12, 5];   // レベル選択時に設定するdB代表値
+const LEVEL_DB     = [30, 20, 10, 3, 0];   // レベル選択時に設定するdB代表値
 
-// レベル別フィルターパラメータ（要件定義 v3.0 準拠）
-// pixel: ピクセル化スケール, blur: ガウシアンブラー半径(px)
+// レベル別フィルターパラメータ
+// pixel: ピクセル化スケール, blur: ガウシアンブラー半径(px), black: 完全遮蔽
 const FILTER_PARAMS = {
-  1: { pixel: 4,  blur: 2  },
-  2: { pixel: 8,  blur: 4  },
-  3: { pixel: 12, blur: 8  },
-  4: { pixel: 20, blur: 12 }
+  1: { pixel: 8,  blur: 4  },              // 軽度 (15〜24dB)
+  2: { pixel: 14, blur: 8  },              // 中等度 (5〜14dB)
+  3: { pixel: 24, blur: 16 },              // 強度 (0〜5dB)
+  4: { black: true }                       // 真っ暗 (0dB以下)
 };
 
 const GRID_SIZE = 64;          // 補間グリッド（iOS版32→64に向上）
 const FIELD_DEG = 30;          // シミュレーション円 = 半径30度
 const STORAGE_KEY = "hfa-sim-data-v1";
 
-// dB値 → レベル（要件定義準拠）
+// dB値 → レベル
+// 25dB以上=正常 / 15〜24=軽度 / 5〜14=中等度 / 0〜5=強度 / 0以下=真っ暗
 function levelForDb(db) {
   if (db >= 25) return 0;
-  if (db >= 20) return 1;
-  if (db >= 15) return 2;
-  if (db >= 10) return 3;
+  if (db >= 15) return 1;
+  if (db >= 5)  return 2;
+  if (db > 0)   return 3;
   return 4;
 }
 
 /* =========================================================
  * 状態
  * ======================================================= */
-let dbValues = new Array(STANDARD_POINTS.length).fill(32); // 全点正常で初期化
+let dbValues = new Array(STANDARD_POINTS.length).fill(30); // 全点正常で初期化
 let selectedLevel = 4;
 let gridMap = null;        // Float32Array(GRID_SIZE*GRID_SIZE) dB値
 let gridDirty = true;      // 再補間が必要か
@@ -436,16 +437,16 @@ document.querySelector('#palette button[data-level="4"]').classList.add("selecte
  * プリセット
  * ======================================================= */
 const PRESETS = {
-  normal: () => 32,
+  normal: () => 30,
   constriction: (x, y) => {
     const r = Math.hypot(x, y);
-    return r <= 9 ? 32 : (r <= 16 ? 17 : 5);
+    return r <= 9 ? 30 : (r <= 16 ? 10 : 0);
   },
   central: (x, y) => {
     const r = Math.hypot(x, y);
-    return r <= 9 ? 5 : (r <= 16 ? 17 : 32);
+    return r <= 9 ? 0 : (r <= 16 ? 10 : 30);
   },
-  superior: (x, y) => (y > 0 ? 5 : 32)
+  superior: (x, y) => (y > 0 ? 0 : 30)
 };
 
 document.getElementById("applyPreset").addEventListener("click", () => {
@@ -457,7 +458,7 @@ document.getElementById("applyPreset").addEventListener("click", () => {
 });
 
 document.getElementById("clearBtn").addEventListener("click", () => {
-  dbValues.fill(32);
+  dbValues.fill(30);
   refreshFieldSvg();
   onDataChanged();
 });
@@ -672,6 +673,21 @@ function buildMasks() {
 function drawFilteredLayer(level) {
   const { W, H } = work;
   const p = FILTER_PARAMS[level];
+
+  // レベル4: 完全遮蔽（真っ暗）
+  if (p.black) {
+    if (work.layer.width !== W || work.layer.height !== H) {
+      work.layer.width = W; work.layer.height = H;
+    }
+    const lctx = work.layer.getContext("2d");
+    lctx.clearRect(0, 0, W, H);
+    lctx.fillStyle = "#000";
+    lctx.fillRect(0, 0, W, H);
+    lctx.globalCompositeOperation = "destination-in";
+    lctx.drawImage(work.masks[level].canvas, 0, 0);
+    lctx.globalCompositeOperation = "source-over";
+    return;
+  }
 
   // 1) 縮小してピクセル化
   const sw = Math.max(1, Math.round(W / p.pixel));
