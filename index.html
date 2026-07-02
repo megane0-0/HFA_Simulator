@@ -149,6 +149,14 @@
   <button id="navCamera">② カメラシミュレーション</button>
 </nav>
 
+<noscript>
+  <div style="max-width:720px;margin:12px auto;padding:14px;background:#fff3cd;border:1px solid #ffc107;border-radius:10px;font-size:0.9rem;">
+    ⚠️ この環境ではJavaScriptが動作しないため、アプリを使用できません。
+    ファイルアプリ等の「プレビュー」ではなく、Safari・Chromeなどのブラウザで開いてください
+    （GitHub Pagesで公開したURLへのアクセスを推奨）。
+  </div>
+</noscript>
+
 <main>
   <!-- ===== 入力タブ ===== -->
   <section id="tabInput" class="active">
@@ -200,6 +208,16 @@
         <button class="btn secondary" id="switchBtn" disabled>カメラ切替</button>
         <button class="btn" id="captureBtn" disabled>撮影して保存</button>
       </div>
+      <div class="toolbar" style="align-items:center; margin-top:12px;">
+        <label for="fovSelect" style="font-size:0.85rem; font-weight:600;">画角設定（映像短辺の視野角）</label>
+        <select id="fovSelect">
+          <option value="30">標準: 短辺=30度（仮定）</option>
+          <option value="43">iPhone 17 広角 1×（約43度）</option>
+          <option value="76">iPhone 17 超広角 0.5×（約76度）</option>
+          <option value="22">iPhone 17 2×（約22度）</option>
+        </select>
+      </div>
+      <p class="hint">シミュレーション円は視野半径30度に対応します。画角設定を実際のカメラに合わせると、円の大きさが実際の視野角と一致します。円の外側（視野30度超）は黒く表示されます。</p>
       <p id="camStatus">「カメラ開始」を押してください（ブラウザのカメラ許可が必要です）</p>
     </div>
   </section>
@@ -507,6 +525,28 @@ let stream = null;
 let facing = "environment";
 let rafId = null;
 
+// 画角設定: カメラ映像の短辺が視野何度に相当するか
+const FOV_KEY = "hfa-sim-fov-v1";
+let fovShort = 30;
+const fovSelect = document.getElementById("fovSelect");
+try {
+  const savedFov = parseFloat(localStorage.getItem(FOV_KEY));
+  if (savedFov > 0) { fovShort = savedFov; fovSelect.value = String(savedFov); }
+} catch (e) {}
+fovSelect.addEventListener("change", () => {
+  fovShort = parseFloat(fovSelect.value) || 30;
+  try { localStorage.setItem(FOV_KEY, String(fovShort)); } catch (e) {}
+  updateGeometry();
+});
+
+// 視野半径30度に対応する表示半径(px)を画角設定から算出
+function updateGeometry() {
+  if (!work.W) return;
+  const minSide = Math.min(work.W, work.H);
+  work.R = FIELD_DEG * (minSide / fovShort);
+  masksDirty = true;
+}
+
 // 作業用キャンバス群（再利用）
 const work = {
   W: 0, H: 0, R: 0,
@@ -541,17 +581,17 @@ async function startCamera() {
   const scale = Math.min(1, 960 / Math.max(video.videoWidth, video.videoHeight));
   work.W = Math.round(video.videoWidth * scale);
   work.H = Math.round(video.videoHeight * scale);
-  work.R = Math.min(work.W, work.H) * 0.45;   // 半径30度に相当する表示半径
   outCanvas.width = work.W;
   outCanvas.height = work.H;
-  masksDirty = true;
+  updateGeometry();   // 画角設定から視野円の半径を算出
 
   startBtn.textContent = "カメラ停止";
   switchBtn.disabled = false;
   captureBtn.disabled = false;
-  camStatus.textContent = FILTER_SUPPORTED
-    ? "シミュレーション実行中（中央の円が半径30度の視野に対応）"
-    : "シミュレーション実行中（このブラウザはblur非対応のため近似表示）";
+  camStatus.textContent = (FILTER_SUPPORTED
+    ? "シミュレーション実行中"
+    : "シミュレーション実行中（このブラウザはblur非対応のため近似表示）")
+    + `（短辺=${fovShort}度・円=視野半径30度）`;
   renderLoop();
 }
 
@@ -681,6 +721,15 @@ function renderLoop() {
     drawFilteredLayer(lv);
     outCtx.drawImage(work.layer, 0, 0);
   }
+
+  // 視野円（半径30度）の外側を黒でマスク
+  outCtx.save();
+  outCtx.beginPath();
+  outCtx.rect(0, 0, W, H);
+  outCtx.arc(W / 2, H / 2, work.R, 0, Math.PI * 2);
+  outCtx.fillStyle = "#000";
+  outCtx.fill("evenodd");
+  outCtx.restore();
 }
 
 /* ---- 撮影保存 ---- */
