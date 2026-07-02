@@ -277,10 +277,10 @@ const LEVEL_DB     = [30, 20, 10, 3, 0];   // レベル選択時に設定するd
 // レベル別フィルターパラメータ
 // pixel: ピクセル化スケール, blur: ガウシアンブラー半径(px), black: 完全遮蔽
 const FILTER_PARAMS = {
-  1: { pixel: 8,  blur: 4  },              // 軽度 (15〜24dB)
-  2: { pixel: 14, blur: 8  },              // 中等度 (5〜14dB)
-  3: { pixel: 24, blur: 16 },              // 強度 (0〜5dB)
-  4: { black: true }                       // 真っ暗 (0dB以下)
+  1: { pixel: 8,  blur: 4,  dim: 0    },   // 軽度 (15〜24dB)
+  2: { pixel: 14, blur: 8,  dim: 0    },   // 中等度 (5〜14dB)
+  3: { pixel: 32, blur: 24, dim: 0.35 },   // 強度 (0〜5dB) 形はほぼ判別不能
+  4: { black: true }                       // 真っ暗 (0dB以下) 完全遮蔽
 };
 
 const GRID_SIZE = 64;          // 補間グリッド（iOS版32→64に向上）
@@ -676,6 +676,13 @@ function buildMasks() {
     mctx.fillStyle = grad;
     mctx.fillRect(0, 0, W, H);
     mctx.globalCompositeOperation = "source-over";
+
+    // レベル4（真っ暗）は不透明度を強化:
+    // 境界の滑らか化で黒が透けないよう、マスクを自己合成してアルファを立ち上げる
+    if (lv === 4) {
+      mctx.drawImage(mc, 0, 0);
+      mctx.drawImage(mc, 0, 0);   // α → 1-(1-α)^3 ステップ状に近づく
+    }
   }
   masksDirty = false;
 }
@@ -723,6 +730,12 @@ function drawFilteredLayer(level) {
   }
   lctx.drawImage(work.small, 0, 0, W, H);
   if (FILTER_SUPPORTED) lctx.filter = "none";
+
+  // 2.5) 減光（強度レベルのみ: コントラストを落とし判別不能に近づける）
+  if (p.dim > 0) {
+    lctx.fillStyle = `rgba(0,0,0,${p.dim})`;
+    lctx.fillRect(0, 0, W, H);
+  }
 
   // 3) マスク適用
   lctx.globalCompositeOperation = "destination-in";
