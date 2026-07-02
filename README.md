@@ -1,4 +1,4 @@
-[README.md](https://github.com/user-attachments/files/29581969/README.md)
+[README.md](https://github.com/user-attachments/files/29598981/README.md)
 作成日: 20260702
 最終更新日: 20260702（画角設定・視野円マスク追加）
 
@@ -70,8 +70,8 @@ GitHub PagesはHTTPSなので、スマホのブラウザからこのURLを開け
 | 0 | 25dB以上 | なし | なし | 正常・元画像そのまま |
 | 1 | 15〜24dB | 8 | 4px | 軽度のぼやけ |
 | 2 | 5〜14dB | 14 | 8px | 中等度のぼやけ |
-| 3 | 0〜5dB | 24 | 16px | 強いぼやけ・色のみ判別可 |
-| 4 | 0dB以下 | − | − | 真っ暗（完全遮蔽） |
+| 3 | 0〜5dB | 32 | 24px + 35%減光 | 形はほぼ判別不能・色調のみ |
+| 4 | 0dB以下 | − | − | 真っ暗（完全遮蔽・不透明度強化済み） |
 
 ## iOS版からの主な変更点
 
