@@ -212,9 +212,15 @@
         <label for="fovSelect" style="font-size:0.85rem; font-weight:600;">画角設定（映像短辺の視野角）</label>
         <select id="fovSelect">
           <option value="30">標準: 短辺=30度（仮定）</option>
-          <option value="43">iPhone 17 広角 1×（約43度）</option>
-          <option value="76">iPhone 17 超広角 0.5×（約76度）</option>
-          <option value="22">iPhone 17 2×（約22度）</option>
+          <optgroup label="iPhone（メインカメラ）">
+            <option value="43">iPhone 15 / 16 / 17 / 16e / Air（約43度）</option>
+            <option value="46">iPhone 15 / 16 / 17 Pro・Pro Max（約46度）</option>
+          </optgroup>
+          <optgroup label="Android（メインカメラ）">
+            <option value="44">Google Pixel 9 / 10 シリーズ（約44度）</option>
+            <option value="47">Galaxy S24 / S25 シリーズ（約47度）</option>
+            <option value="45.9">Xperia 1 VII（約46度）</option>
+          </optgroup>
         </select>
       </div>
       <p class="hint">シミュレーション円は視野半径30度に対応します。画角設定を実際のカメラに合わせると、円の大きさが実際の視野角と一致します。円の外側（視野30度超）は黒く表示されます。</p>
@@ -532,7 +538,12 @@ let fovShort = 30;
 const fovSelect = document.getElementById("fovSelect");
 try {
   const savedFov = parseFloat(localStorage.getItem(FOV_KEY));
-  if (savedFov > 0) { fovShort = savedFov; fovSelect.value = String(savedFov); }
+  if (savedFov > 0) {
+    fovSelect.value = String(savedFov);
+    // 保存値が現在の選択肢にない場合は既定(30度)に戻す
+    fovShort = (fovSelect.value === String(savedFov)) ? savedFov : 30;
+    if (fovShort === 30) fovSelect.value = "30";
+  }
 } catch (e) {}
 fovSelect.addEventListener("change", () => {
   fovShort = parseFloat(fovSelect.value) || 30;
