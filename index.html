@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>視野検査シミュレーター</title>
+<style>
+  :root {
+    --c-l0: #2e7d32;
+    --c-l1: #f9a825;
+    --c-l2: #ef6c00;
+    --c-l3: #c62828;
+    --c-l4: #212121;
+    --accent: #1565c0;
+    --bg: #f5f6f8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif;
+    background: var(--bg);
+    color: #222;
+    line-height: 1.6;
+  }
+  header {
+    background: var(--accent);
+    color: #fff;
+    padding: 12px 16px;
+    text-align: center;
+  }
+  header h1 { font-size: 1.15rem; }
+  header p { font-size: 0.75rem; opacity: 0.85; }
+  nav {
+    display: flex;
+    background: #fff;
+    border-bottom: 2px solid #ddd;
+  }
+  nav button {
+    flex: 1;
+    padding: 12px 4px;
+    border: none;
+    background: none;
+    font-size: 0.95rem;
+    cursor: pointer;
+    color: #666;
+    border-bottom: 3px solid transparent;
+  }
+  nav button.active {
+    color: var(--accent);
+    font-weight: 700;
+    border-bottom-color: var(--accent);
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 12px; }
+  section { display: none; }
+  section.active { display: block; }
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .card h2 { font-size: 1rem; margin-bottom: 8px; }
+  .palette { display: flex; gap: 6px; flex-wrap: wrap; }
+  .palette button {
+    flex: 1;
+    min-width: 60px;
+    padding: 8px 2px;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.72rem;
+    color: #fff;
+    line-height: 1.3;
+  }
+  .palette button small { display: block; font-size: 0.65rem; opacity: 0.9; }
+  .palette button.selected {
+    border-color: #000;
+    box-shadow: 0 0 0 2px #fff inset;
+  }
+  .pal-0 { background: var(--c-l0); }
+  .pal-1 { background: var(--c-l1); color: #222 !important; }
+  .pal-2 { background: var(--c-l2); }
+  .pal-3 { background: var(--c-l3); }
+  .pal-4 { background: var(--c-l4); }
+  #fieldWrap { display: flex; justify-content: center; }
+  #fieldSvg {
+    width: 100%;
+    max-width: 480px;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .btn {
+    padding: 10px 14px;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn.secondary { background: #e0e0e0; color: #222; }
+  .btn.danger { background: #b71c1c; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  select {
+    padding: 9px;
+    border-radius: 8px;
+    border: 1px solid #bbb;
+    font-size: 0.9rem;
+  }
+  #previewCanvas {
+    width: 180px;
+    height: 180px;
+    border-radius: 50%;
+    border: 1px solid #ccc;
+    display: block;
+    margin: 8px auto 0;
+  }
+  #cameraArea { position: relative; }
+  #outCanvas {
+    width: 100%;
+    border-radius: 10px;
+    background: #000;
+    display: block;
+    min-height: 200px;
+  }
+  #camStatus { font-size: 0.85rem; color: #555; margin-top: 6px; }
+  footer {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 12px 16px 24px;
+    font-size: 0.75rem;
+    color: #777;
+  }
+  footer strong { color: #b71c1c; }
+  .hint { font-size: 0.8rem; color: #666; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>視野検査シミュレーター</h1>
+  <p>ハンフリー自動視野計 24-2（76点）対応・Web版</p>
+</header>
+
+<nav>
+  <button id="navInput" class="active">① 視野データ入力</button>
+  <button id="navCamera">② カメラシミュレーション</button>
+</nav>
+
+<main>
+  <!-- ===== 入力タブ ===== -->
+  <section id="tabInput" class="active">
+    <div class="card">
+      <h2>視野欠損レベルを選択して測定点をタップ</h2>
+      <div class="palette" id="palette">
+        <button class="pal-0" data-level="0">レベル0<small>25dB以上・正常</small></button>
+        <button class="pal-1" data-level="1">レベル1<small>20〜24dB・軽度</small></button>
+        <button class="pal-2" data-level="2">レベル2<small>15〜19dB・中度</small></button>
+        <button class="pal-3" data-level="3">レベル3<small>10〜14dB・高度</small></button>
+        <button class="pal-4" data-level="4">レベル4<small>10dB未満・重篤</small></button>
+      </div>
+      <p class="hint">点をタップまたはドラッグ（なぞる）で選択中のレベルを適用します。両眼重ね合わせ視野を入力してください。</p>
+    </div>
+
+    <div class="card">
+      <div id="fieldWrap">
+        <svg id="fieldSvg" viewBox="0 0 440 440" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+      <div class="toolbar">
+        <select id="presetSelect">
+          <option value="">プリセットを選択…</option>
+          <option value="normal">正常視野</option>
+          <option value="constriction">求心性視野狭窄</option>
+          <option value="central">中心暗点</option>
+          <option value="superior">上半視野欠損</option>
+        </select>
+        <button class="btn secondary" id="applyPreset">適用</button>
+        <button class="btn danger" id="clearBtn">全てリセット</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>補間マッププレビュー（64×64グリッド）</h2>
+      <canvas id="previewCanvas" width="256" height="256"></canvas>
+      <p class="hint" style="text-align:center">測定点間はIDW（逆距離加重）補間で滑らかに接続されます</p>
+    </div>
+  </section>
+
+  <!-- ===== カメラタブ ===== -->
+  <section id="tabCamera">
+    <div class="card">
+      <div id="cameraArea">
+        <video id="video" autoplay playsinline muted style="display:none"></video>
+        <canvas id="outCanvas" width="960" height="540"></canvas>
+      </div>
+      <div class="toolbar">
+        <button class="btn" id="startBtn">カメラ開始</button>
+        <button class="btn secondary" id="switchBtn" disabled>カメラ切替</button>
+        <button class="btn" id="captureBtn" disabled>撮影して保存</button>
+      </div>
+      <p id="camStatus">「カメラ開始」を押してください（ブラウザのカメラ許可が必要です）</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <strong>【重要】本アプリは医療機器ではありません。</strong>
+  視野欠損の見え方を家族・支援者に伝えるための理解促進・教育目的のツールであり、
+  診断・治療の根拠として使用することはできません。実際の見え方には個人差があります。
+  入力されたデータは端末内（ブラウザ）でのみ処理され、外部には送信されません。
+</footer>
+
+<script>
+"use strict";
+
+/* =========================================================
+ * 定数・データモデル
+ * ======================================================= */
+
+// ハンフリー24-2の76点配置（中心点(0,0)を除く、単位: 度）
+const STANDARD_POINTS = [
+  // 中心周辺（6度）
+  [3,3],[3,-3],[-3,3],[-3,-3],
+  // 12度リング
+  [3,9],[3,-9],[-3,9],[-3,-9],
+  [9,3],[9,-3],[-9,3],[-9,-3],
+  // 18度リング
+  [3,15],[3,-15],[-3,15],[-3,-15],
+  [9,9],[9,-9],[-9,9],[-9,-9],
+  [15,3],[15,-3],[-15,3],[-15,-3],
+  // 24度リング
+  [3,21],[3,-21],[-3,21],[-3,-21],
+  [9,15],[9,-15],[-9,15],[-9,-15],
+  [15,9],[15,-9],[-15,9],[-15,-9],
+  [21,3],[21,-3],[-21,3],[-21,-3],
+  // 27度（24-2の最外周）
+  [3,27],[3,-27],[-3,27],[-3,-27],
+  [9,21],[9,-21],[-9,21],[-9,-21],
+  [15,15],[15,-15],[-15,15],[-15,-15],
+  [21,9],[21,-9],[-21,9],[-21,-9],
+  [27,3],[27,-3],[-27,3],[-27,-3],
+  [9,27],[9,-27],[-9,27],[-9,-27],
+  [15,21],[15,-21],[-15,21],[-15,-21],
+  [21,15],[21,-15],[-21,15],[-21,-15],
+  [27,9],[27,-9],[-27,9],[-27,-9]
+];
+
+const LEVEL_COLORS = ["#2e7d32", "#f9a825", "#ef6c00", "#c62828", "#212121"];
+const LEVEL_DB     = [32, 22, 17, 12, 5];   // レベル選択時に設定するdB代表値
+
+// レベル別フィルターパラメータ（要件定義 v3.0 準拠）
+// pixel: ピクセル化スケール, blur: ガウシアンブラー半径(px)
+const FILTER_PARAMS = {
+  1: { pixel: 4,  blur: 2  },
+  2: { pixel: 8,  blur: 4  },
+  3: { pixel: 12, blur: 8  },
+  4: { pixel: 20, blur: 12 }
+};
+
+const GRID_SIZE = 64;          // 補間グリッド（iOS版32→64に向上）
+const FIELD_DEG = 30;          // シミュレーション円 = 半径30度
+const STORAGE_KEY = "hfa-sim-data-v1";
+
+// dB値 → レベル（要件定義準拠）
+function levelForDb(db) {
+  if (db >= 25) return 0;
+  if (db >= 20) return 1;
+  if (db >= 15) return 2;
+  if (db >= 10) return 3;
+  return 4;
+}
+
+/* =========================================================
+ * 状態
+ * ======================================================= */
+let dbValues = new Array(STANDARD_POINTS.length).fill(32); // 全点正常で初期化
+let selectedLevel = 4;
+let gridMap = null;        // Float32Array(GRID_SIZE*GRID_SIZE) dB値
+let gridDirty = true;      // 再補間が必要か
+let masksDirty = true;     // マスク再生成が必要か
+
+/* =========================================================
+ * 補間（IDW: 逆距離加重, power=2）
+ * ======================================================= */
+function computeGrid() {
+  const g = new Float32Array(GRID_SIZE * GRID_SIZE);
+  const n = STANDARD_POINTS.length;
+  for (let r = 0; r < GRID_SIZE; r++) {
+    // canvas行(上→下) を 視野座標y(上が正) に変換
+    const yDeg = FIELD_DEG - (r + 0.5) * (2 * FIELD_DEG / GRID_SIZE);
+    for (let c = 0; c < GRID_SIZE; c++) {
+      const xDeg = (c + 0.5) * (2 * FIELD_DEG / GRID_SIZE) - FIELD_DEG;
+      let wSum = 0, vSum = 0, exact = -1;
+      for (let k = 0; k < n; k++) {
+        const dx = xDeg - STANDARD_POINTS[k][0];
+        const dy = yDeg - STANDARD_POINTS[k][1];
+        const d2 = dx * dx + dy * dy;
+        if (d2 < 0.01) { exact = k; break; }
+        const w = 1 / d2;              // power=2 → 1/d^2
+        wSum += w;
+        vSum += w * dbValues[k];
+      }
+      g[r * GRID_SIZE + c] = (exact >= 0) ? dbValues[exact]
+                            : (wSum > 0 ? vSum / wSum : 25);
+    }
+  }
+  gridMap = g;
+  gridDirty = false;
+  masksDirty = true;
+}
+
+function ensureGrid() {
+  if (gridDirty || !gridMap) computeGrid();
+}
+
+/* =========================================================
+ * 入力UI（SVG 76点）
+ * ======================================================= */
+const svg = document.getElementById("fieldSvg");
+const SVG_SIZE = 440, SVG_C = SVG_SIZE / 2, SVG_SCALE = (SVG_SIZE / 2 - 20) / FIELD_DEG;
+const pointEls = [];
+
+function buildFieldSvg() {
+  const NS = "http://www.w3.org/2000/svg";
+  // 外周円・十字線
+  const deco = `
+    <circle cx="${SVG_C}" cy="${SVG_C}" r="${FIELD_DEG * SVG_SCALE}" fill="none" stroke="#ccc" stroke-width="1"/>
+    <line x1="${SVG_C}" y1="20" x2="${SVG_C}" y2="${SVG_SIZE - 20}" stroke="#eee" stroke-width="1"/>
+    <line x1="20" y1="${SVG_C}" x2="${SVG_SIZE - 20}" y2="${SVG_C}" stroke="#eee" stroke-width="1"/>
+    <circle cx="${SVG_C}" cy="${SVG_C}" r="3" fill="#1565c0"/>
+  `;
+  svg.insertAdjacentHTML("beforeend", deco);
+
+  STANDARD_POINTS.forEach((p, i) => {
+    const cx = SVG_C + p[0] * SVG_SCALE;
+    const cy = SVG_C - p[1] * SVG_SCALE;
+    const gEl = document.createElementNS(NS, "g");
+    gEl.setAttribute("data-index", i);
+    gEl.style.cursor = "pointer";
+
+    const hit = document.createElementNS(NS, "circle"); // 当たり判定用の透明円
+    hit.setAttribute("cx", cx); hit.setAttribute("cy", cy);
+    hit.setAttribute("r", 15); hit.setAttribute("fill", "transparent");
+    hit.setAttribute("data-index", i);
+
+    const circ = document.createElementNS(NS, "circle");
+    circ.setAttribute("cx", cx); circ.setAttribute("cy", cy);
+    circ.setAttribute("r", 11);
+    circ.setAttribute("stroke", "rgba(0,0,0,0.25)");
+    circ.setAttribute("data-index", i);
+
+    const txt = document.createElementNS(NS, "text");
+    txt.setAttribute("x", cx); txt.setAttribute("y", cy + 3.5);
+    txt.setAttribute("text-anchor", "middle");
+    txt.setAttribute("font-size", "10");
+    txt.setAttribute("font-weight", "600");
+    txt.setAttribute("pointer-events", "none");
+
+    gEl.appendChild(hit); gEl.appendChild(circ); gEl.appendChild(txt);
+    svg.appendChild(gEl);
+    pointEls.push({ circ, txt });
+  });
+  refreshFieldSvg();
+}
+
+function refreshFieldSvg() {
+  dbValues.forEach((db, i) => {
+    const lv = levelForDb(db);
+    pointEls[i].circ.setAttribute("fill", LEVEL_COLORS[lv]);
+    pointEls[i].txt.textContent = Math.round(db);
+    pointEls[i].txt.setAttribute("fill", lv === 1 ? "#222" : "#fff");
+  });
+}
+
+function setPoint(i, level) {
+  if (dbValues[i] === LEVEL_DB[level]) return;
+  dbValues[i] = LEVEL_DB[level];
+  const lv = levelForDb(dbValues[i]);
+  pointEls[i].circ.setAttribute("fill", LEVEL_COLORS[lv]);
+  pointEls[i].txt.textContent = Math.round(dbValues[i]);
+  pointEls[i].txt.setAttribute("fill", lv === 1 ? "#222" : "#fff");
+  onDataChanged();
+}
+
+// タップ＋ドラッグ塗り
+let painting = false;
+function paintAt(clientX, clientY) {
+  const el = document.elementFromPoint(clientX, clientY);
+  if (!el) return;
+  const idx = el.getAttribute && el.getAttribute("data-index");
+  if (idx !== null && idx !== undefined && idx !== "") {
+    setPoint(parseInt(idx, 10), selectedLevel);
+  }
+}
+svg.addEventListener("pointerdown", e => {
+  painting = true;
+  paintAt(e.clientX, e.clientY);
+  e.preventDefault();
+});
+svg.addEventListener("pointermove", e => {
+  if (painting) { paintAt(e.clientX, e.clientY); e.preventDefault(); }
+});
+window.addEventListener("pointerup", () => { painting = false; });
+
+// パレット
+document.querySelectorAll("#palette button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    selectedLevel = parseInt(btn.dataset.level, 10);
+    document.querySelectorAll("#palette button").forEach(b => b.classList.remove("selected"));
+    btn.classList.add("selected");
+  });
+});
+document.querySelector('#palette button[data-level="4"]').classList.add("selected");
+
+/* =========================================================
+ * プリセット
+ * ======================================================= */
+const PRESETS = {
+  normal: () => 32,
+  constriction: (x, y) => {
+    const r = Math.hypot(x, y);
+    return r <= 9 ? 32 : (r <= 16 ? 17 : 5);
+  },
+  central: (x, y) => {
+    const r = Math.hypot(x, y);
+    return r <= 9 ? 5 : (r <= 16 ? 17 : 32);
+  },
+  superior: (x, y) => (y > 0 ? 5 : 32)
+};
+
+document.getElementById("applyPreset").addEventListener("click", () => {
+  const key = document.getElementById("presetSelect").value;
+  if (!key || !PRESETS[key]) return;
+  dbValues = STANDARD_POINTS.map(p => PRESETS[key](p[0], p[1]));
+  refreshFieldSvg();
+  onDataChanged();
+});
+
+document.getElementById("clearBtn").addEventListener("click", () => {
+  dbValues.fill(32);
+  refreshFieldSvg();
+  onDataChanged();
+});
+
+/* =========================================================
+ * データ変更 → 保存・補間・プレビュー更新
+ * ======================================================= */
+let previewTimer = null;
+function onDataChanged() {
+  gridDirty = true;
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dbValues)); } catch (e) {}
+  // 連続ドラッグ中の再計算を間引く
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(() => { ensureGrid(); drawPreview(); }, 150);
+}
+
+function loadSaved() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr) && arr.length === STANDARD_POINTS.length) {
+      dbValues = arr.map(v => Math.max(0, Math.min(35, Number(v) || 0)));
+    }
+  } catch (e) {}
+}
+
+/* =========================================================
+ * 補間マッププレビュー
+ * ======================================================= */
+function drawPreview() {
+  ensureGrid();
+  const cv = document.getElementById("previewCanvas");
+  const ctx = cv.getContext("2d");
+  const tmp = document.createElement("canvas");
+  tmp.width = GRID_SIZE; tmp.height = GRID_SIZE;
+  const tctx = tmp.getContext("2d");
+  const img = tctx.createImageData(GRID_SIZE, GRID_SIZE);
+  for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
+    const lv = levelForDb(gridMap[i]);
+    const hex = LEVEL_COLORS[lv];
+    img.data[i * 4]     = parseInt(hex.slice(1, 3), 16);
+    img.data[i * 4 + 1] = parseInt(hex.slice(3, 5), 16);
+    img.data[i * 4 + 2] = parseInt(hex.slice(5, 7), 16);
+    img.data[i * 4 + 3] = 255;
+  }
+  tctx.putImageData(img, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(tmp, 0, 0, cv.width, cv.height);
+}
+
+/* =========================================================
+ * カメラシミュレーション
+ * ======================================================= */
+const video = document.getElementById("video");
+const outCanvas = document.getElementById("outCanvas");
+const outCtx = outCanvas.getContext("2d");
+const camStatus = document.getElementById("camStatus");
+const startBtn = document.getElementById("startBtn");
+const switchBtn = document.getElementById("switchBtn");
+const captureBtn = document.getElementById("captureBtn");
+
+let stream = null;
+let facing = "environment";
+let rafId = null;
+
+// 作業用キャンバス群（再利用）
+const work = {
+  W: 0, H: 0, R: 0,
+  small: document.createElement("canvas"),   // ピクセル化用縮小
+  layer: document.createElement("canvas"),   // レベル別フィルター結果
+  masks: {}                                   // level -> {canvas, hasPixels}
+};
+
+// ctx.filter (ブラー) 対応判定
+const FILTER_SUPPORTED = (() => {
+  const c = document.createElement("canvas").getContext("2d");
+  return typeof c.filter === "string";
+})();
+
+async function startCamera() {
+  stopCamera();
+  camStatus.textContent = "カメラを起動しています…";
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+  } catch (err) {
+    camStatus.textContent = "カメラを起動できませんでした: " + err.name +
+      "（HTTPSでのアクセスとカメラ許可が必要です）";
+    return;
+  }
+  video.srcObject = stream;
+  await video.play();
+
+  // 作業解像度（最大960px）
+  const scale = Math.min(1, 960 / Math.max(video.videoWidth, video.videoHeight));
+  work.W = Math.round(video.videoWidth * scale);
+  work.H = Math.round(video.videoHeight * scale);
+  work.R = Math.min(work.W, work.H) * 0.45;   // 半径30度に相当する表示半径
+  outCanvas.width = work.W;
+  outCanvas.height = work.H;
+  masksDirty = true;
+
+  startBtn.textContent = "カメラ停止";
+  switchBtn.disabled = false;
+  captureBtn.disabled = false;
+  camStatus.textContent = FILTER_SUPPORTED
+    ? "シミュレーション実行中（中央の円が半径30度の視野に対応）"
+    : "シミュレーション実行中（このブラウザはblur非対応のため近似表示）";
+  renderLoop();
+}
+
+function stopCamera() {
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+  video.srcObject = null;
+  startBtn.textContent = "カメラ開始";
+  switchBtn.disabled = true;
+  captureBtn.disabled = true;
+}
+
+startBtn.addEventListener("click", () => {
+  if (stream) { stopCamera(); camStatus.textContent = "停止しました"; }
+  else startCamera();
+});
+switchBtn.addEventListener("click", () => {
+  facing = (facing === "environment") ? "user" : "environment";
+  startCamera();
+});
+
+/* ---- レベル別マスク生成 ----
+ * 64x64グリッド → 表示解像度へ滑らかに拡大し、
+ * 半径30度円の内側のみソフトエッジで適用する。
+ */
+function buildMasks() {
+  ensureGrid();
+  const { W, H, R } = work;
+  const cx = W / 2, cy = H / 2;
+
+  for (let lv = 1; lv <= 4; lv++) {
+    // 64x64のアルファマスク
+    const tmp = document.createElement("canvas");
+    tmp.width = GRID_SIZE; tmp.height = GRID_SIZE;
+    const tctx = tmp.getContext("2d");
+    const img = tctx.createImageData(GRID_SIZE, GRID_SIZE);
+    let count = 0;
+    for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
+      if (levelForDb(gridMap[i]) === lv) {
+        img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = 255;
+        img.data[i * 4 + 3] = 255;
+        count++;
+      }
+    }
+    tctx.putImageData(img, 0, 0);
+
+    let entry = work.masks[lv];
+    if (!entry) {
+      entry = { canvas: document.createElement("canvas"), hasPixels: false };
+      work.masks[lv] = entry;
+    }
+    entry.hasPixels = count > 0;
+    if (!entry.hasPixels) continue;
+
+    const mc = entry.canvas;
+    mc.width = W; mc.height = H;
+    const mctx = mc.getContext("2d");
+    mctx.clearRect(0, 0, W, H);
+    // グリッドは視野±30度 = 円の外接正方形(2R×2R)に対応
+    mctx.imageSmoothingEnabled = true;
+    mctx.drawImage(tmp, cx - R, cy - R, 2 * R, 2 * R);
+    // 円形ソフトクリップ
+    mctx.globalCompositeOperation = "destination-in";
+    const grad = mctx.createRadialGradient(cx, cy, R * 0.9, cx, cy, R);
+    grad.addColorStop(0, "rgba(255,255,255,1)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    mctx.fillStyle = grad;
+    mctx.fillRect(0, 0, W, H);
+    mctx.globalCompositeOperation = "source-over";
+  }
+  masksDirty = false;
+}
+
+/* ---- レベル別フィルター（ピクセル化＋ブラー） ---- */
+function drawFilteredLayer(level) {
+  const { W, H } = work;
+  const p = FILTER_PARAMS[level];
+
+  // 1) 縮小してピクセル化
+  const sw = Math.max(1, Math.round(W / p.pixel));
+  const sh = Math.max(1, Math.round(H / p.pixel));
+  if (work.small.width !== sw || work.small.height !== sh) {
+    work.small.width = sw; work.small.height = sh;
+  }
+  const sctx = work.small.getContext("2d");
+  sctx.imageSmoothingEnabled = true;
+  sctx.drawImage(video, 0, 0, sw, sh);
+
+  // 2) 拡大＋ブラー
+  if (work.layer.width !== W || work.layer.height !== H) {
+    work.layer.width = W; work.layer.height = H;
+  }
+  const lctx = work.layer.getContext("2d");
+  lctx.clearRect(0, 0, W, H);
+  lctx.imageSmoothingEnabled = false;   // ピクセル感を維持
+  if (FILTER_SUPPORTED && p.blur > 0) {
+    lctx.filter = `blur(${p.blur}px)`;
+    lctx.imageSmoothingEnabled = true;  // blur併用時は滑らかに
+  }
+  lctx.drawImage(work.small, 0, 0, W, H);
+  if (FILTER_SUPPORTED) lctx.filter = "none";
+
+  // 3) マスク適用
+  lctx.globalCompositeOperation = "destination-in";
+  lctx.drawImage(work.masks[level].canvas, 0, 0);
+  lctx.globalCompositeOperation = "source-over";
+}
+
+function renderLoop() {
+  rafId = requestAnimationFrame(renderLoop);
+  if (!stream || video.readyState < 2) return;
+
+  if (gridDirty) computeGrid();
+  if (masksDirty) buildMasks();
+
+  const { W, H } = work;
+  // 元映像
+  outCtx.drawImage(video, 0, 0, W, H);
+
+  // レベル1→4の順に重ねる（重い欠損ほど上）
+  for (let lv = 1; lv <= 4; lv++) {
+    const m = work.masks[lv];
+    if (!m || !m.hasPixels) continue;
+    drawFilteredLayer(lv);
+    outCtx.drawImage(work.layer, 0, 0);
+  }
+}
+
+/* ---- 撮影保存 ---- */
+captureBtn.addEventListener("click", () => {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const name = `視野シミュレーション_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.png`;
+  outCanvas.toBlob(blob => {
+    if (!blob) return;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    camStatus.textContent = "画像を保存しました: " + name;
+  }, "image/png");
+});
+
+/* =========================================================
+ * タブ切替
+ * ======================================================= */
+const tabs = {
+  navInput:  "tabInput",
+  navCamera: "tabCamera"
+};
+Object.keys(tabs).forEach(navId => {
+  document.getElementById(navId).addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll("main section").forEach(s => s.classList.remove("active"));
+    document.getElementById(navId).classList.add("active");
+    document.getElementById(tabs[navId]).classList.add("active");
+    if (navId !== "navCamera" && stream) {
+      stopCamera();
+      camStatus.textContent = "タブ移動のため停止しました";
+    }
+  });
+});
+
+// ページ離脱時にカメラ停止
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && stream) stopCamera();
+});
+
+/* =========================================================
+ * 初期化
+ * ======================================================= */
+loadSaved();
+buildFieldSvg();
+computeGrid();
+drawPreview();
+</script>
+</body>
+</html>
