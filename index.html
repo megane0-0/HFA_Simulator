@@ -82,6 +82,35 @@
   .pal-2 { background: var(--c-l2); }
   .pal-3 { background: var(--c-l3); }
   .pal-4 { background: var(--c-l4); }
+  .eyetabs { display: flex; gap: 6px; }
+  .eyetabs button {
+    flex: 1;
+    padding: 10px 4px;
+    border: 2px solid #bbb;
+    border-radius: 8px;
+    background: #fff;
+    font-size: 0.92rem;
+    cursor: pointer;
+    color: #555;
+  }
+  .eyetabs button.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 700;
+    background: #e8f0fb;
+  }
+  .dbrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .dbrow input[type="number"] {
+    width: 84px;
+    padding: 9px;
+    border: 1px solid #bbb;
+    border-radius: 8px;
+    font-size: 0.95rem;
+  }
+  .dbrow .btn.selected {
+    outline: 2px solid #000;
+    outline-offset: 1px;
+  }
   #fieldWrap { display: flex; justify-content: center; }
   #fieldSvg {
     width: 100%;
@@ -161,15 +190,29 @@
   <!-- ===== 入力タブ ===== -->
   <section id="tabInput" class="active">
     <div class="card">
+      <h2>入力する眼を選択</h2>
+      <div class="eyetabs" id="eyeTabs">
+        <button data-eye="od" class="active">右眼（OD）</button>
+        <button data-eye="os">左眼（OS）</button>
+      </div>
+      <p class="hint">左右それぞれの検査結果を入力できます。シミュレーションには両眼重ね合わせ（各点で感度の良い方の値）が使われます。片眼のみ入力する場合は「この眼をもう一方へコピー」で同じデータにできます。</p>
+    </div>
+
+    <div class="card">
       <h2>視野欠損レベルを選択して測定点をタップ</h2>
       <div class="palette" id="palette">
         <button class="pal-0" data-level="0">レベル0<small>25dB以上・正常</small></button>
         <button class="pal-1" data-level="1">レベル1<small>15〜24dB・軽度</small></button>
         <button class="pal-2" data-level="2">レベル2<small>5〜14dB・中等度</small></button>
-        <button class="pal-3" data-level="3">レベル3<small>0〜5dB・強度</small></button>
+        <button class="pal-3" data-level="3">レベル3<small>1〜4dB・強度</small></button>
         <button class="pal-4" data-level="4">レベル4<small>0dB以下・真っ暗</small></button>
       </div>
-      <p class="hint">点をタップまたはドラッグ（なぞる）で選択中のレベルを適用します。両眼重ね合わせ視野を入力してください。</p>
+      <div class="dbrow">
+        <label for="dbInput" style="font-size:0.85rem; font-weight:600;">dB値を直接入力:</label>
+        <input type="number" id="dbInput" min="0" max="40" step="1" value="12" inputmode="numeric">
+        <button class="btn secondary" id="dbPaintBtn">この値で塗る</button>
+      </div>
+      <p class="hint">点をタップまたはドラッグ（なぞる）で、選択中のレベル（またはdB値）を適用します。検査結果のdB値をそのまま入力したい場合は「この値で塗る」を選んでください。</p>
     </div>
 
     <div class="card">
@@ -184,15 +227,19 @@
           <option value="central">中心暗点</option>
           <option value="superior">上半視野欠損</option>
         </select>
-        <button class="btn secondary" id="applyPreset">適用</button>
-        <button class="btn danger" id="clearBtn">全てリセット</button>
+        <button class="btn secondary" id="applyPreset">適用（この眼）</button>
+      </div>
+      <div class="toolbar">
+        <button class="btn secondary" id="copyEyeBtn">この眼をもう一方へコピー</button>
+        <button class="btn danger" id="clearBtn">この眼をリセット</button>
+        <button class="btn danger" id="clearAllBtn">両眼リセット</button>
       </div>
     </div>
 
     <div class="card">
-      <h2>補間マッププレビュー（64×64グリッド）</h2>
+      <h2>両眼重ね合わせ 補間マッププレビュー（64×64グリッド）</h2>
       <canvas id="previewCanvas" width="256" height="256"></canvas>
-      <p class="hint" style="text-align:center">測定点間はIDW（逆距離加重）補間で滑らかに接続されます</p>
+      <p class="hint" style="text-align:center">左右眼を重ね合わせ（各点で感度の良い方）、IDW（逆距離加重）補間した結果です。カメラシミュレーションにはこのマップが使われます</p>
     </div>
   </section>
 
@@ -279,16 +326,18 @@ const LEVEL_DB     = [30, 20, 10, 3, 0];   // レベル選択時に設定するd
 const FILTER_PARAMS = {
   1: { pixel: 8,  blur: 4,  dim: 0    },   // 軽度 (15〜24dB)
   2: { pixel: 14, blur: 8,  dim: 0    },   // 中等度 (5〜14dB)
-  3: { pixel: 32, blur: 24, dim: 0.35 },   // 強度 (0〜5dB) 形はほぼ判別不能
+  3: { pixel: 32, blur: 24, dim: 0.35 },   // 強度 (1〜4dB) 形はほぼ判別不能
   4: { black: true }                       // 真っ暗 (0dB以下) 完全遮蔽
 };
 
 const GRID_SIZE = 64;          // 補間グリッド（iOS版32→64に向上）
 const FIELD_DEG = 30;          // シミュレーション円 = 半径30度
-const STORAGE_KEY = "hfa-sim-data-v1";
+const STORAGE_KEY = "hfa-sim-data-v2";   // {od:[76], os:[76]}
+const LEGACY_KEY  = "hfa-sim-data-v1";   // 旧形式: 単一配列（両眼まとめて入力）
+const DB_MAX = 40;
 
 // dB値 → レベル
-// 25dB以上=正常 / 15〜24=軽度 / 5〜14=中等度 / 0〜5=強度 / 0以下=真っ暗
+// 25dB以上=正常 / 15〜24=軽度 / 5〜14=中等度 / 1〜4=強度 / 0以下=真っ暗
 function levelForDb(db) {
   if (db >= 25) return 0;
   if (db >= 15) return 1;
@@ -300,11 +349,24 @@ function levelForDb(db) {
 /* =========================================================
  * 状態
  * ======================================================= */
-let dbValues = new Array(STANDARD_POINTS.length).fill(30); // 全点正常で初期化
-let selectedLevel = 4;
+const N_POINTS = STANDARD_POINTS.length;
+// 左右眼別の視野データ（右眼=OD, 左眼=OS）。全点正常で初期化
+let eyeData = {
+  od: new Array(N_POINTS).fill(30),
+  os: new Array(N_POINTS).fill(30)
+};
+let currentEye = "od";
+let dbValues = eyeData.od;  // 表示・編集中の眼の配列（eyeData[currentEye]への参照）
+// 塗りモード: レベル選択 or dB値直接入力
+let paintMode = { type: "level", level: 4 };
 let gridMap = null;        // Float32Array(GRID_SIZE*GRID_SIZE) dB値
 let gridDirty = true;      // 再補間が必要か
 let masksDirty = true;     // マスク再生成が必要か
+
+// 両眼重ね合わせ: 各点で感度の良い方（dB値の大きい方）を採用
+function combinedDb(i) {
+  return Math.max(eyeData.od[i], eyeData.os[i]);
+}
 
 /* =========================================================
  * 補間（IDW: 逆距離加重, power=2）
@@ -325,9 +387,9 @@ function computeGrid() {
         if (d2 < 0.01) { exact = k; break; }
         const w = 1 / d2;              // power=2 → 1/d^2
         wSum += w;
-        vSum += w * dbValues[k];
+        vSum += w * combinedDb(k);
       }
-      g[r * GRID_SIZE + c] = (exact >= 0) ? dbValues[exact]
+      g[r * GRID_SIZE + c] = (exact >= 0) ? combinedDb(exact)
                             : (wSum > 0 ? vSum / wSum : 25);
     }
   }
@@ -399,14 +461,21 @@ function refreshFieldSvg() {
   });
 }
 
-function setPoint(i, level) {
-  if (dbValues[i] === LEVEL_DB[level]) return;
-  dbValues[i] = LEVEL_DB[level];
-  const lv = levelForDb(dbValues[i]);
+function setPoint(i, db) {
+  db = Math.max(0, Math.min(DB_MAX, db));
+  if (dbValues[i] === db) return;
+  dbValues[i] = db;
+  const lv = levelForDb(db);
   pointEls[i].circ.setAttribute("fill", LEVEL_COLORS[lv]);
-  pointEls[i].txt.textContent = Math.round(dbValues[i]);
+  pointEls[i].txt.textContent = Math.round(db);
   pointEls[i].txt.setAttribute("fill", lv === 1 ? "#222" : "#fff");
   onDataChanged();
+}
+
+// 現在の塗りモードから適用するdB値を返す
+function paintDb() {
+  if (paintMode.type === "db") return paintMode.value;
+  return LEVEL_DB[paintMode.level];
 }
 
 // タップ＋ドラッグ塗り
@@ -416,7 +485,7 @@ function paintAt(clientX, clientY) {
   if (!el) return;
   const idx = el.getAttribute && el.getAttribute("data-index");
   if (idx !== null && idx !== undefined && idx !== "") {
-    setPoint(parseInt(idx, 10), selectedLevel);
+    setPoint(parseInt(idx, 10), paintDb());
   }
 }
 svg.addEventListener("pointerdown", e => {
@@ -429,15 +498,56 @@ svg.addEventListener("pointermove", e => {
 });
 window.addEventListener("pointerup", () => { painting = false; });
 
-// パレット
+// パレット（レベル選択）
+const dbInput = document.getElementById("dbInput");
+const dbPaintBtn = document.getElementById("dbPaintBtn");
+
+function clearPaintSelection() {
+  document.querySelectorAll("#palette button").forEach(b => b.classList.remove("selected"));
+  dbPaintBtn.classList.remove("selected");
+}
+
 document.querySelectorAll("#palette button").forEach(btn => {
   btn.addEventListener("click", () => {
-    selectedLevel = parseInt(btn.dataset.level, 10);
-    document.querySelectorAll("#palette button").forEach(b => b.classList.remove("selected"));
+    paintMode = { type: "level", level: parseInt(btn.dataset.level, 10) };
+    clearPaintSelection();
     btn.classList.add("selected");
   });
 });
 document.querySelector('#palette button[data-level="4"]').classList.add("selected");
+
+// dB値直接入力モード
+function currentInputDb() {
+  const v = parseFloat(dbInput.value);
+  return isNaN(v) ? 0 : Math.max(0, Math.min(DB_MAX, v));
+}
+dbPaintBtn.addEventListener("click", () => {
+  paintMode = { type: "db", value: currentInputDb() };
+  clearPaintSelection();
+  dbPaintBtn.classList.add("selected");
+});
+dbInput.addEventListener("input", () => {
+  if (paintMode.type === "db") paintMode.value = currentInputDb();
+});
+
+// 左右眼タブ切替
+document.querySelectorAll("#eyeTabs button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.eye === currentEye) return;
+    currentEye = btn.dataset.eye;
+    dbValues = eyeData[currentEye];
+    document.querySelectorAll("#eyeTabs button")
+      .forEach(b => b.classList.toggle("active", b === btn));
+    refreshFieldSvg();
+  });
+});
+
+// この眼をもう一方へコピー
+document.getElementById("copyEyeBtn").addEventListener("click", () => {
+  const other = (currentEye === "od") ? "os" : "od";
+  eyeData[other] = dbValues.slice();
+  onDataChanged();
+});
 
 /* =========================================================
  * プリセット
@@ -458,7 +568,8 @@ const PRESETS = {
 document.getElementById("applyPreset").addEventListener("click", () => {
   const key = document.getElementById("presetSelect").value;
   if (!key || !PRESETS[key]) return;
-  dbValues = STANDARD_POINTS.map(p => PRESETS[key](p[0], p[1]));
+  eyeData[currentEye] = STANDARD_POINTS.map(p => PRESETS[key](p[0], p[1]));
+  dbValues = eyeData[currentEye];
   refreshFieldSvg();
   onDataChanged();
 });
@@ -469,25 +580,51 @@ document.getElementById("clearBtn").addEventListener("click", () => {
   onDataChanged();
 });
 
+document.getElementById("clearAllBtn").addEventListener("click", () => {
+  eyeData.od.fill(30);
+  eyeData.os.fill(30);
+  refreshFieldSvg();
+  onDataChanged();
+});
+
 /* =========================================================
  * データ変更 → 保存・補間・プレビュー更新
  * ======================================================= */
 let previewTimer = null;
 function onDataChanged() {
   gridDirty = true;
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dbValues)); } catch (e) {}
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ od: eyeData.od, os: eyeData.os }));
+  } catch (e) {}
   // 連続ドラッグ中の再計算を間引く
   clearTimeout(previewTimer);
   previewTimer = setTimeout(() => { ensureGrid(); drawPreview(); }, 150);
 }
 
 function loadSaved() {
+  const clampArr = a => a.map(v => Math.max(0, Math.min(DB_MAX, Number(v) || 0)));
   try {
+    // 新形式（v2: 左右眼別）
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const arr = JSON.parse(raw);
-    if (Array.isArray(arr) && arr.length === STANDARD_POINTS.length) {
-      dbValues = arr.map(v => Math.max(0, Math.min(35, Number(v) || 0)));
+    if (raw) {
+      const obj = JSON.parse(raw);
+      if (obj && Array.isArray(obj.od) && obj.od.length === N_POINTS &&
+          Array.isArray(obj.os) && obj.os.length === N_POINTS) {
+        eyeData.od = clampArr(obj.od);
+        eyeData.os = clampArr(obj.os);
+        dbValues = eyeData[currentEye];
+        return;
+      }
+    }
+    // 旧形式（v1: 単一配列＝両眼まとめて入力）からの移行: 両眼に同じ値を設定
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy) {
+      const arr = JSON.parse(legacy);
+      if (Array.isArray(arr) && arr.length === N_POINTS) {
+        eyeData.od = clampArr(arr);
+        eyeData.os = clampArr(arr);
+        dbValues = eyeData[currentEye];
+      }
     }
   } catch (e) {}
 }
