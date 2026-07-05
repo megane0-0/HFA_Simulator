@@ -164,6 +164,19 @@
   }
   footer strong { color: #b71c1c; }
   .hint { font-size: 0.8rem; color: #666; margin-top: 6px; }
+  /* OCR */
+  #ocrCanvasWrap { position: relative; width: 100%; overflow: hidden; border: 1px solid #ccc; border-radius: 8px; background: #fafafa; }
+  #ocrCanvas { width: 100%; display: block; touch-action: none; }
+  #ocrProgress { font-size: 0.85rem; color: #555; margin-top: 8px; min-height: 1.2em; }
+  .filepick {
+    display: inline-block; padding: 10px 14px; border-radius: 8px;
+    background: var(--accent); color: #fff; font-size: 0.9rem; cursor: pointer;
+  }
+  .filepick input { display: none; }
+  .ocr-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 0.75rem; background: #e8f0fb; color: var(--accent); margin-left: 6px;
+  }
 </style>
 </head>
 <body>
@@ -175,7 +188,8 @@
 
 <nav>
   <button id="navInput" class="active">① 視野データ入力</button>
-  <button id="navCamera">② カメラシミュレーション</button>
+  <button id="navCamera">② カメラ</button>
+  <button id="navOcr">③ OCR読み取り</button>
 </nav>
 
 <noscript>
@@ -237,15 +251,20 @@
     </div>
 
     <div class="card">
-      <h2>両眼重ね合わせ 補間マッププレビュー（64×64グリッド）</h2>
+      <h2 id="previewTitle">両眼重ね合わせ 補間マッププレビュー（64×64グリッド）</h2>
       <canvas id="previewCanvas" width="256" height="256"></canvas>
-      <p class="hint" style="text-align:center">左右眼を重ね合わせ（各点で感度の良い方）、IDW（逆距離加重）補間した結果です。カメラシミュレーションにはこのマップが使われます</p>
+      <p class="hint" style="text-align:center">IDW（逆距離加重）補間した結果です。カメラシミュレーションにはこのマップが使われます。対象の眼（右眼・左眼・両眼）はカメラ画面のボタンで切り替えられます</p>
     </div>
   </section>
 
   <!-- ===== カメラタブ ===== -->
   <section id="tabCamera">
     <div class="card">
+      <div class="eyetabs" id="simEyeTabs" style="margin-bottom:10px;">
+        <button data-sim="od">右眼（OD）</button>
+        <button data-sim="os">左眼（OS）</button>
+        <button data-sim="both" class="active">両眼（better eye）</button>
+      </div>
       <div id="cameraArea">
         <video id="video" autoplay playsinline muted style="display:none"></video>
         <canvas id="outCanvas" width="960" height="540"></canvas>
@@ -270,8 +289,49 @@
           </optgroup>
         </select>
       </div>
-      <p class="hint">シミュレーション円は視野半径30度に対応します。画角設定を実際のカメラに合わせると、円の大きさが実際の視野角と一致します。円の外側（視野30度超）は黒く表示されます。</p>
+      <p class="hint">上のボタンで表示する眼を切り替えられます。「両眼」では各測定点で左右の感度が良い方（better eye）を採用した両眼視モデルになります。シミュレーション円は視野半径30度に対応します。画角設定を実際のカメラに合わせると、円の大きさが実際の視野角と一致します。円の外側（視野30度超）は黒く表示されます。</p>
       <p id="camStatus">「カメラ開始」を押してください（ブラウザのカメラ許可が必要です）</p>
+    </div>
+  </section>
+
+  <!-- ===== OCRタブ ===== -->
+  <section id="tabOcr">
+    <div class="card">
+      <h2>HFA結果紙から数値プロットを読み取る</h2>
+      <p class="hint">HFA（24-2）の<strong>数値プロット（dB値が並んだ図）</strong>を撮影またはアップロードして、視野データへ自動入力します。読み取り結果は①入力タブで確認・修正できます。OCRの精度には限界があるため、必ず値を確認してください。</p>
+    </div>
+
+    <div class="card">
+      <h2>1. 反映先の眼を選択</h2>
+      <div class="eyetabs" id="ocrEyeTabs">
+        <button data-eye="od" class="active">右眼（OD）</button>
+        <button data-eye="os">左眼（OS）</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2. 画像を選ぶ</h2>
+      <div class="toolbar">
+        <label class="filepick">画像をアップロード
+          <input type="file" id="ocrFile" accept="image/*">
+        </label>
+        <label class="filepick" style="background:#455a64;">カメラで撮影
+          <input type="file" id="ocrCamera" accept="image/*" capture="environment">
+        </label>
+      </div>
+      <p class="hint">読み取りたい<strong>数値プロットの範囲を画像上でドラッグして枠選択</strong>してください（枠が数値グリッドにぴったり合うほど精度が上がります）。未選択の場合は画像全体を対象にします。</p>
+      <div id="ocrCanvasWrap" style="margin-top:10px; display:none;">
+        <canvas id="ocrCanvas"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>3. 解析して反映</h2>
+      <div class="toolbar">
+        <button class="btn" id="ocrRunBtn" disabled>OCR解析</button>
+        <button class="btn secondary" id="ocrApplyBtn" disabled>①入力タブに反映して確認</button>
+      </div>
+      <p id="ocrProgress"></p>
     </div>
   </section>
 </main>
@@ -332,6 +392,9 @@ const FILTER_PARAMS = {
 
 const GRID_SIZE = 64;          // 補間グリッド（iOS版32→64に向上）
 const FIELD_DEG = 30;          // シミュレーション円 = 半径30度
+const K_NEAREST = 4;           // IDWで使う近傍点数。全点を使うと遠方の正常点に
+                               // 引っ張られて暗点内部が明るくなり、測定点直上だけ
+                               // 暗い「まだら」になるため近傍4点に限定する
 const STORAGE_KEY = "hfa-sim-data-v2";   // {od:[76], os:[76]}
 const LEGACY_KEY  = "hfa-sim-data-v1";   // 旧形式: 単一配列（両眼まとめて入力）
 const DB_MAX = 40;
@@ -363,34 +426,74 @@ let gridMap = null;        // Float32Array(GRID_SIZE*GRID_SIZE) dB値
 let gridDirty = true;      // 再補間が必要か
 let masksDirty = true;     // マスク再生成が必要か
 
-// 両眼重ね合わせ: 各点で感度の良い方（dB値の大きい方）を採用
-function combinedDb(i) {
+// シミュレーション対象の眼（カメラ画面で切替）: "od" | "os" | "both"
+const SIM_EYE_KEY = "hfa-sim-eye-v1";
+let simEye = "both";
+try {
+  const s = localStorage.getItem(SIM_EYE_KEY);
+  if (s === "od" || s === "os" || s === "both") simEye = s;
+} catch (e) {}
+
+const SIM_EYE_LABEL = { od: "右眼（OD）", os: "左眼（OS）", both: "両眼重ね合わせ" };
+
+// シミュレーションに使うdB値
+// 両眼: 各点で感度の良い方（better eye = dB値の大きい方）を採用する両眼視モデル
+function simDb(i) {
+  if (simEye === "od") return eyeData.od[i];
+  if (simEye === "os") return eyeData.os[i];
   return Math.max(eyeData.od[i], eyeData.os[i]);
 }
 
 /* =========================================================
- * 補間（IDW: 逆距離加重, power=2）
+ * 補間（IDW: 逆距離加重, power=2, 近傍K_NEAREST点限定）
+ *
+ * 24-2は中心(0,0)に測定点がないため、最内4点(±3,±3)の平均値を
+ * 持つ仮想中心点を追加する。これにより中心暗点で最内4点の内側が
+ * 面として暗くなる（従来は測定点直上だけ暗い「まだら」だった）。
  * ======================================================= */
 function computeGrid() {
   const g = new Float32Array(GRID_SIZE * GRID_SIZE);
-  const n = STANDARD_POINTS.length;
+
+  // 補間用の点群 = 仮想中心点 + 76測定点
+  // STANDARD_POINTSの先頭4点は(3,3),(3,-3),(-3,3),(-3,-3)
+  const centerDb = (simDb(0) + simDb(1) + simDb(2) + simDb(3)) / 4;
+  const n = N_POINTS + 1;
+  const xs = new Float32Array(n), ys = new Float32Array(n), vs = new Float32Array(n);
+  xs[0] = 0; ys[0] = 0; vs[0] = centerDb;
+  for (let k = 0; k < N_POINTS; k++) {
+    xs[k + 1] = STANDARD_POINTS[k][0];
+    ys[k + 1] = STANDARD_POINTS[k][1];
+    vs[k + 1] = simDb(k);
+  }
+
+  const bw = new Float32Array(K_NEAREST);  // 上位K件の重み
+  const bv = new Float32Array(K_NEAREST);  // 対応するdB値
   for (let r = 0; r < GRID_SIZE; r++) {
     // canvas行(上→下) を 視野座標y(上が正) に変換
     const yDeg = FIELD_DEG - (r + 0.5) * (2 * FIELD_DEG / GRID_SIZE);
     for (let c = 0; c < GRID_SIZE; c++) {
       const xDeg = (c + 0.5) * (2 * FIELD_DEG / GRID_SIZE) - FIELD_DEG;
-      let wSum = 0, vSum = 0, exact = -1;
+      bw.fill(0);
+      let exact = -1;
       for (let k = 0; k < n; k++) {
-        const dx = xDeg - STANDARD_POINTS[k][0];
-        const dy = yDeg - STANDARD_POINTS[k][1];
+        const dx = xDeg - xs[k];
+        const dy = yDeg - ys[k];
         const d2 = dx * dx + dy * dy;
         if (d2 < 0.01) { exact = k; break; }
         const w = 1 / d2;              // power=2 → 1/d^2
-        wSum += w;
-        vSum += w * combinedDb(k);
+        // 重み上位K_NEAREST件を挿入ソートで保持
+        if (w > bw[K_NEAREST - 1]) {
+          let j = K_NEAREST - 1;
+          while (j > 0 && bw[j - 1] < w) {
+            bw[j] = bw[j - 1]; bv[j] = bv[j - 1]; j--;
+          }
+          bw[j] = w; bv[j] = vs[k];
+        }
       }
-      g[r * GRID_SIZE + c] = (exact >= 0) ? combinedDb(exact)
-                            : (wSum > 0 ? vSum / wSum : 25);
+      if (exact >= 0) { g[r * GRID_SIZE + c] = vs[exact]; continue; }
+      let wSum = 0, vSum = 0;
+      for (let j = 0; j < K_NEAREST; j++) { wSum += bw[j]; vSum += bw[j] * bv[j]; }
+      g[r * GRID_SIZE + c] = wSum > 0 ? vSum / wSum : 25;
     }
   }
   gridMap = g;
@@ -547,6 +650,31 @@ document.getElementById("copyEyeBtn").addEventListener("click", () => {
   const other = (currentEye === "od") ? "os" : "od";
   eyeData[other] = dbValues.slice();
   onDataChanged();
+});
+
+// シミュレーション表示眼の切替（カメラ画面: 右眼/左眼/両眼）
+function updatePreviewTitle() {
+  document.getElementById("previewTitle").textContent =
+    SIM_EYE_LABEL[simEye] + " 補間マッププレビュー（64×64グリッド）";
+}
+function updateSimEyeTabs() {
+  document.querySelectorAll("#simEyeTabs button")
+    .forEach(b => b.classList.toggle("active", b.dataset.sim === simEye));
+}
+document.querySelectorAll("#simEyeTabs button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.sim === simEye) return;
+    simEye = btn.dataset.sim;
+    try { localStorage.setItem(SIM_EYE_KEY, simEye); } catch (e) {}
+    updateSimEyeTabs();
+    updatePreviewTitle();
+    gridDirty = true;          // 次フレームで再補間→マスク再生成
+    ensureGrid();
+    drawPreview();
+    if (stream) {
+      camStatus.textContent = "シミュレーション実行中（表示: " + SIM_EYE_LABEL[simEye] + "）";
+    }
+  });
 });
 
 /* =========================================================
@@ -740,7 +868,7 @@ async function startCamera() {
   camStatus.textContent = (FILTER_SUPPORTED
     ? "シミュレーション実行中"
     : "シミュレーション実行中（このブラウザはblur非対応のため近似表示）")
-    + `（短辺=${fovShort}度・円=視野半径30度）`;
+    + `（表示: ${SIM_EYE_LABEL[simEye]}・短辺=${fovShort}度・円=視野半径30度）`;
   renderLoop();
 }
 
@@ -928,23 +1056,300 @@ captureBtn.addEventListener("click", () => {
 });
 
 /* =========================================================
+ * OCR読み取り（Tesseract.js・CDN遅延ロード）
+ * ======================================================= */
+const OCR = {
+  eye: "od",
+  img: null,               // 読み込んだImage
+  crop: null,              // 画像px座標のクロップ {x,y,w,h}。null=全体
+  scale: 1,                // canvas表示px / 画像px
+  detected: [],            // [{value, cx, cy}] cx,cyは画像px座標
+  ready: false,            // 反映可能か
+  worker: null
+};
+const ocrWrap    = document.getElementById("ocrCanvasWrap");
+const ocrCanvas  = document.getElementById("ocrCanvas");
+const ocrCtx     = ocrCanvas.getContext("2d");
+const ocrProg    = document.getElementById("ocrProgress");
+const ocrRunBtn  = document.getElementById("ocrRunBtn");
+const ocrApplyBtn= document.getElementById("ocrApplyBtn");
+
+// 反映先の眼タブ
+document.querySelectorAll("#ocrEyeTabs button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    OCR.eye = btn.dataset.eye;
+    document.querySelectorAll("#ocrEyeTabs button")
+      .forEach(b => b.classList.toggle("active", b === btn));
+  });
+});
+
+// 画像読み込み（アップロード / カメラ）
+function loadOcrImage(file) {
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  const im = new Image();
+  im.onload = () => {
+    OCR.img = im;
+    OCR.crop = null;
+    OCR.detected = [];
+    OCR.ready = false;
+    ocrApplyBtn.disabled = true;
+    ocrRunBtn.disabled = false;
+    ocrWrap.style.display = "block";
+    layoutOcrCanvas();
+    ocrProg.textContent = "枠選択（任意）のあと「OCR解析」を押してください。";
+    URL.revokeObjectURL(url);
+  };
+  im.src = url;
+}
+document.getElementById("ocrFile").addEventListener("change", e => loadOcrImage(e.target.files[0]));
+document.getElementById("ocrCamera").addEventListener("change", e => loadOcrImage(e.target.files[0]));
+
+// canvasに画像を収める（最大幅にフィット）
+function layoutOcrCanvas() {
+  if (!OCR.img) return;
+  const maxW = ocrWrap.clientWidth || 480;
+  OCR.scale = Math.min(1, maxW / OCR.img.width);
+  ocrCanvas.width  = Math.round(OCR.img.width  * OCR.scale);
+  ocrCanvas.height = Math.round(OCR.img.height * OCR.scale);
+  drawOcrCanvas();
+}
+
+function drawOcrCanvas() {
+  if (!OCR.img) return;
+  const s = OCR.scale;
+  ocrCtx.clearRect(0, 0, ocrCanvas.width, ocrCanvas.height);
+  ocrCtx.drawImage(OCR.img, 0, 0, ocrCanvas.width, ocrCanvas.height);
+  // クロップ枠
+  if (OCR.crop) {
+    const { x, y, w, h } = OCR.crop;
+    ocrCtx.save();
+    ocrCtx.strokeStyle = "#1565c0";
+    ocrCtx.lineWidth = 2;
+    ocrCtx.setLineDash([6, 4]);
+    ocrCtx.strokeRect(x * s, y * s, w * s, h * s);
+    // 枠外を薄暗く
+    ocrCtx.fillStyle = "rgba(0,0,0,0.35)";
+    ocrCtx.beginPath();
+    ocrCtx.rect(0, 0, ocrCanvas.width, ocrCanvas.height);
+    ocrCtx.rect(x * s, y * s, w * s, h * s);
+    ocrCtx.fill("evenodd");
+    ocrCtx.restore();
+  }
+  // 検出結果マーカー
+  ocrCtx.save();
+  ocrCtx.font = "bold 12px sans-serif";
+  OCR.detected.forEach(d => {
+    const px = d.cx * s, py = d.cy * s;
+    ocrCtx.fillStyle = "rgba(21,101,192,0.85)";
+    ocrCtx.beginPath();
+    ocrCtx.arc(px, py, 9, 0, Math.PI * 2);
+    ocrCtx.fill();
+    ocrCtx.fillStyle = "#fff";
+    ocrCtx.textAlign = "center";
+    ocrCtx.textBaseline = "middle";
+    ocrCtx.fillText(String(d.value), px, py);
+  });
+  ocrCtx.restore();
+}
+
+// ドラッグで枠選択（画像px座標に変換して保持）
+let ocrDragging = false, ocrStart = null;
+function ocrPt(e) {
+  const rect = ocrCanvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / OCR.scale;
+  const y = (e.clientY - rect.top) / OCR.scale;
+  return {
+    x: Math.max(0, Math.min(OCR.img.width, x)),
+    y: Math.max(0, Math.min(OCR.img.height, y))
+  };
+}
+ocrCanvas.addEventListener("pointerdown", e => {
+  if (!OCR.img) return;
+  ocrDragging = true;
+  ocrStart = ocrPt(e);
+  ocrCanvas.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+ocrCanvas.addEventListener("pointermove", e => {
+  if (!ocrDragging) return;
+  const p = ocrPt(e);
+  OCR.crop = {
+    x: Math.min(ocrStart.x, p.x), y: Math.min(ocrStart.y, p.y),
+    w: Math.abs(p.x - ocrStart.x), h: Math.abs(p.y - ocrStart.y)
+  };
+  drawOcrCanvas();
+});
+ocrCanvas.addEventListener("pointerup", () => {
+  ocrDragging = false;
+  // 極小の枠は無効化（誤タップ対策）
+  if (OCR.crop && (OCR.crop.w < 10 || OCR.crop.h < 10)) OCR.crop = null;
+  drawOcrCanvas();
+});
+window.addEventListener("resize", layoutOcrCanvas);
+
+// Tesseract.js を必要時にCDNロード
+const TESSERACT_CDN = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js";
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = TESSERACT_CDN;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("Tesseract.jsの読み込みに失敗しました（オフライン時は使用できません）"));
+    document.head.appendChild(s);
+  });
+}
+
+// 解析対象の領域を高解像度の作業canvasに切り出す
+function ocrSourceCanvas() {
+  const c = OCR.crop || { x: 0, y: 0, w: OCR.img.width, h: OCR.img.height };
+  // OCR精度のため長辺1600px程度に拡大
+  const target = 1600;
+  const k = Math.min(3, Math.max(1, target / Math.max(c.w, c.h)));
+  const cv = document.createElement("canvas");
+  cv.width = Math.round(c.w * k);
+  cv.height = Math.round(c.h * k);
+  const cx = cv.getContext("2d");
+  cx.imageSmoothingEnabled = true;
+  cx.drawImage(OCR.img, c.x, c.y, c.w, c.h, 0, 0, cv.width, cv.height);
+  // 簡易2値化でコントラストを上げる
+  const id = cx.getImageData(0, 0, cv.width, cv.height);
+  const d = id.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    const v = g < 140 ? 0 : 255;
+    d[i] = d[i + 1] = d[i + 2] = v;
+  }
+  cx.putImageData(id, 0, 0);
+  return { cv, region: c, k };
+}
+
+ocrRunBtn.addEventListener("click", async () => {
+  if (!OCR.img) return;
+  ocrRunBtn.disabled = true;
+  ocrApplyBtn.disabled = true;
+  OCR.detected = [];
+  try {
+    ocrProg.textContent = "OCRエンジンを準備中…（初回はダウンロードに時間がかかります）";
+    await loadTesseract();
+    const { cv, region, k } = ocrSourceCanvas();
+    ocrProg.textContent = "解析中…";
+    const { data } = await window.Tesseract.recognize(cv, "eng", {
+      logger: m => {
+        if (m.status === "recognizing text") {
+          ocrProg.textContent = "解析中… " + Math.round(m.progress * 100) + "%";
+        }
+      },
+      tessedit_char_whitelist: "0123456789",
+      tessedit_pageseg_mode: "11"   // sparse text
+    });
+    // 単語を数値として取り出し、画像px座標の中心へ変換
+    const words = (data.words || []).filter(w => /^\d{1,2}$/.test((w.text || "").trim()));
+    OCR.detected = words.map(w => {
+      const b = w.bbox; // 作業canvas座標
+      const cxWork = (b.x0 + b.x1) / 2, cyWork = (b.y0 + b.y1) / 2;
+      return {
+        value: Math.max(0, Math.min(DB_MAX, parseInt(w.text.trim(), 10))),
+        cx: region.x + cxWork / k,   // 元画像px
+        cy: region.y + cyWork / k
+      };
+    });
+    drawOcrCanvas();
+    if (OCR.detected.length === 0) {
+      ocrProg.textContent = "数値を検出できませんでした。枠選択を数値プロットに合わせる、明るい画像を使うなどをお試しください。";
+      ocrRunBtn.disabled = false;
+      return;
+    }
+    OCR.ready = true;
+    ocrApplyBtn.disabled = false;
+    ocrRunBtn.disabled = false;
+    ocrProg.textContent = OCR.detected.length + "個の数値を検出しました。青い丸が読み取り位置です。問題なければ「①入力タブに反映して確認」を押してください。";
+  } catch (err) {
+    ocrProg.textContent = "エラー: " + (err && err.message ? err.message : err);
+    ocrRunBtn.disabled = false;
+  }
+});
+
+// 検出結果を76点へマッピング（クロップ範囲内で正規化 → 最近傍点へ割当）
+function mapDetectedToPoints() {
+  // 検出点の範囲（bounding box）で正規化。視野±27度に対応させる
+  const EXT = 27;
+  const xs = OCR.detected.map(d => d.cx), ys = OCR.detected.map(d => d.cy);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const spanX = Math.max(1, maxX - minX), spanY = Math.max(1, maxY - minY);
+
+  const assigned = new Array(N_POINTS).fill(null);
+  const assignedDist = new Array(N_POINTS).fill(Infinity);
+  OCR.detected.forEach(d => {
+    const nx = (d.cx - minX) / spanX;          // 0..1（左→右）
+    const ny = (d.cy - minY) / spanY;          // 0..1（上→下）
+    const xDeg = (nx - 0.5) * 2 * EXT;
+    const yDeg = (0.5 - ny) * 2 * EXT;          // 上が正
+    // 最近傍の測定点
+    let best = -1, bestD = Infinity;
+    for (let k = 0; k < N_POINTS; k++) {
+      const dd = (xDeg - STANDARD_POINTS[k][0]) ** 2 + (yDeg - STANDARD_POINTS[k][1]) ** 2;
+      if (dd < bestD) { bestD = dd; best = k; }
+    }
+    if (bestD < assignedDist[best]) { assigned[best] = d.value; assignedDist[best] = bestD; }
+  });
+
+  // 未割当の点は最近傍の割当済み点の値で補完（穴を作らない）
+  const out = new Array(N_POINTS);
+  let nAssigned = 0;
+  for (let k = 0; k < N_POINTS; k++) {
+    if (assigned[k] !== null) { out[k] = assigned[k]; nAssigned++; continue; }
+    let best = -1, bestD = Infinity;
+    for (let j = 0; j < N_POINTS; j++) {
+      if (assigned[j] === null) continue;
+      const dd = (STANDARD_POINTS[k][0] - STANDARD_POINTS[j][0]) ** 2 +
+                 (STANDARD_POINTS[k][1] - STANDARD_POINTS[j][1]) ** 2;
+      if (dd < bestD) { bestD = dd; best = j; }
+    }
+    out[k] = best >= 0 ? assigned[best] : 30;
+  }
+  return { out, nAssigned };
+}
+
+ocrApplyBtn.addEventListener("click", () => {
+  if (!OCR.ready || OCR.detected.length === 0) return;
+  const { out, nAssigned } = mapDetectedToPoints();
+  eyeData[OCR.eye] = out.map(v => Math.max(0, Math.min(DB_MAX, v)));
+  // 入力タブを反映先の眼に切り替えて表示
+  currentEye = OCR.eye;
+  dbValues = eyeData[currentEye];
+  document.querySelectorAll("#eyeTabs button")
+    .forEach(b => b.classList.toggle("active", b.dataset.eye === currentEye));
+  refreshFieldSvg();
+  onDataChanged();
+  // ①入力タブへ移動
+  switchTab("navInput");
+  ocrProg.textContent = `反映しました（${nAssigned}点を直接割当、残りは最近傍補完）。①入力タブで値を確認・修正してください。`;
+});
+
+/* =========================================================
  * タブ切替
  * ======================================================= */
 const tabs = {
   navInput:  "tabInput",
-  navCamera: "tabCamera"
+  navCamera: "tabCamera",
+  navOcr:    "tabOcr"
 };
+function switchTab(navId) {
+  document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll("main section").forEach(s => s.classList.remove("active"));
+  document.getElementById(navId).classList.add("active");
+  document.getElementById(tabs[navId]).classList.add("active");
+  if (navId !== "navCamera" && stream) {
+    stopCamera();
+    camStatus.textContent = "タブ移動のため停止しました";
+  }
+  if (navId === "navOcr" && OCR.img) layoutOcrCanvas();
+}
 Object.keys(tabs).forEach(navId => {
-  document.getElementById(navId).addEventListener("click", () => {
-    document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
-    document.querySelectorAll("main section").forEach(s => s.classList.remove("active"));
-    document.getElementById(navId).classList.add("active");
-    document.getElementById(tabs[navId]).classList.add("active");
-    if (navId !== "navCamera" && stream) {
-      stopCamera();
-      camStatus.textContent = "タブ移動のため停止しました";
-    }
-  });
+  document.getElementById(navId).addEventListener("click", () => switchTab(navId));
 });
 
 // ページ離脱時にカメラ停止
@@ -957,6 +1362,8 @@ document.addEventListener("visibilitychange", () => {
  * ======================================================= */
 loadSaved();
 buildFieldSvg();
+updateSimEyeTabs();
+updatePreviewTitle();
 computeGrid();
 drawPreview();
 </script>
