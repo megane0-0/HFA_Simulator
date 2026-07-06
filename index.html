@@ -164,19 +164,6 @@
   }
   footer strong { color: #b71c1c; }
   .hint { font-size: 0.8rem; color: #666; margin-top: 6px; }
-  /* OCR */
-  #ocrCanvasWrap { position: relative; width: 100%; overflow: hidden; border: 1px solid #ccc; border-radius: 8px; background: #fafafa; }
-  #ocrCanvas { width: 100%; display: block; touch-action: none; }
-  #ocrProgress { font-size: 0.85rem; color: #555; margin-top: 8px; min-height: 1.2em; }
-  .filepick {
-    display: inline-block; padding: 10px 14px; border-radius: 8px;
-    background: var(--accent); color: #fff; font-size: 0.9rem; cursor: pointer;
-  }
-  .filepick input { display: none; }
-  .ocr-badge {
-    display: inline-block; padding: 2px 8px; border-radius: 10px;
-    font-size: 0.75rem; background: #e8f0fb; color: var(--accent); margin-left: 6px;
-  }
 </style>
 </head>
 <body>
@@ -189,7 +176,6 @@
 <nav>
   <button id="navInput" class="active">① 視野データ入力</button>
   <button id="navCamera">② カメラ</button>
-  <button id="navOcr">③ OCR読み取り</button>
 </nav>
 
 <noscript>
@@ -291,47 +277,6 @@
       </div>
       <p class="hint">上のボタンで表示する眼を切り替えられます。「両眼」では各測定点で左右の感度が良い方（better eye）を採用した両眼視モデルになります。シミュレーション円は視野半径30度に対応します。画角設定を実際のカメラに合わせると、円の大きさが実際の視野角と一致します。円の外側（視野30度超）は黒く表示されます。</p>
       <p id="camStatus">「カメラ開始」を押してください（ブラウザのカメラ許可が必要です）</p>
-    </div>
-  </section>
-
-  <!-- ===== OCRタブ ===== -->
-  <section id="tabOcr">
-    <div class="card">
-      <h2>HFA結果紙から数値プロットを読み取る</h2>
-      <p class="hint">HFA（24-2）の<strong>数値プロット（dB値が並んだ図）</strong>を撮影またはアップロードして、視野データへ自動入力します。読み取り結果は①入力タブで確認・修正できます。OCRの精度には限界があるため、必ず値を確認してください。</p>
-    </div>
-
-    <div class="card">
-      <h2>1. 反映先の眼を選択</h2>
-      <div class="eyetabs" id="ocrEyeTabs">
-        <button data-eye="od" class="active">右眼（OD）</button>
-        <button data-eye="os">左眼（OS）</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>2. 画像を選ぶ</h2>
-      <div class="toolbar">
-        <label class="filepick">画像をアップロード
-          <input type="file" id="ocrFile" accept="image/*">
-        </label>
-        <label class="filepick" style="background:#455a64;">カメラで撮影
-          <input type="file" id="ocrCamera" accept="image/*" capture="environment">
-        </label>
-      </div>
-      <p class="hint">読み取りたい<strong>数値プロットの範囲を画像上でドラッグして枠選択</strong>してください（枠が数値グリッドにぴったり合うほど精度が上がります）。未選択の場合は画像全体を対象にします。</p>
-      <div id="ocrCanvasWrap" style="margin-top:10px; display:none;">
-        <canvas id="ocrCanvas"></canvas>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>3. 解析して反映</h2>
-      <div class="toolbar">
-        <button class="btn" id="ocrRunBtn" disabled>OCR解析</button>
-        <button class="btn secondary" id="ocrApplyBtn" disabled>①入力タブに反映して確認</button>
-      </div>
-      <p id="ocrProgress"></p>
     </div>
   </section>
 </main>
@@ -1056,286 +1001,11 @@ captureBtn.addEventListener("click", () => {
 });
 
 /* =========================================================
- * OCR読み取り（Tesseract.js・CDN遅延ロード）
- * ======================================================= */
-const OCR = {
-  eye: "od",
-  img: null,               // 読み込んだImage
-  crop: null,              // 画像px座標のクロップ {x,y,w,h}。null=全体
-  scale: 1,                // canvas表示px / 画像px
-  detected: [],            // [{value, cx, cy}] cx,cyは画像px座標
-  ready: false,            // 反映可能か
-  worker: null
-};
-const ocrWrap    = document.getElementById("ocrCanvasWrap");
-const ocrCanvas  = document.getElementById("ocrCanvas");
-const ocrCtx     = ocrCanvas.getContext("2d");
-const ocrProg    = document.getElementById("ocrProgress");
-const ocrRunBtn  = document.getElementById("ocrRunBtn");
-const ocrApplyBtn= document.getElementById("ocrApplyBtn");
-
-// 反映先の眼タブ
-document.querySelectorAll("#ocrEyeTabs button").forEach(btn => {
-  btn.addEventListener("click", () => {
-    OCR.eye = btn.dataset.eye;
-    document.querySelectorAll("#ocrEyeTabs button")
-      .forEach(b => b.classList.toggle("active", b === btn));
-  });
-});
-
-// 画像読み込み（アップロード / カメラ）
-function loadOcrImage(file) {
-  if (!file) return;
-  const url = URL.createObjectURL(file);
-  const im = new Image();
-  im.onload = () => {
-    OCR.img = im;
-    OCR.crop = null;
-    OCR.detected = [];
-    OCR.ready = false;
-    ocrApplyBtn.disabled = true;
-    ocrRunBtn.disabled = false;
-    ocrWrap.style.display = "block";
-    layoutOcrCanvas();
-    ocrProg.textContent = "枠選択（任意）のあと「OCR解析」を押してください。";
-    URL.revokeObjectURL(url);
-  };
-  im.src = url;
-}
-document.getElementById("ocrFile").addEventListener("change", e => loadOcrImage(e.target.files[0]));
-document.getElementById("ocrCamera").addEventListener("change", e => loadOcrImage(e.target.files[0]));
-
-// canvasに画像を収める（最大幅にフィット）
-function layoutOcrCanvas() {
-  if (!OCR.img) return;
-  const maxW = ocrWrap.clientWidth || 480;
-  OCR.scale = Math.min(1, maxW / OCR.img.width);
-  ocrCanvas.width  = Math.round(OCR.img.width  * OCR.scale);
-  ocrCanvas.height = Math.round(OCR.img.height * OCR.scale);
-  drawOcrCanvas();
-}
-
-function drawOcrCanvas() {
-  if (!OCR.img) return;
-  const s = OCR.scale;
-  ocrCtx.clearRect(0, 0, ocrCanvas.width, ocrCanvas.height);
-  ocrCtx.drawImage(OCR.img, 0, 0, ocrCanvas.width, ocrCanvas.height);
-  // クロップ枠
-  if (OCR.crop) {
-    const { x, y, w, h } = OCR.crop;
-    ocrCtx.save();
-    ocrCtx.strokeStyle = "#1565c0";
-    ocrCtx.lineWidth = 2;
-    ocrCtx.setLineDash([6, 4]);
-    ocrCtx.strokeRect(x * s, y * s, w * s, h * s);
-    // 枠外を薄暗く
-    ocrCtx.fillStyle = "rgba(0,0,0,0.35)";
-    ocrCtx.beginPath();
-    ocrCtx.rect(0, 0, ocrCanvas.width, ocrCanvas.height);
-    ocrCtx.rect(x * s, y * s, w * s, h * s);
-    ocrCtx.fill("evenodd");
-    ocrCtx.restore();
-  }
-  // 検出結果マーカー
-  ocrCtx.save();
-  ocrCtx.font = "bold 12px sans-serif";
-  OCR.detected.forEach(d => {
-    const px = d.cx * s, py = d.cy * s;
-    ocrCtx.fillStyle = "rgba(21,101,192,0.85)";
-    ocrCtx.beginPath();
-    ocrCtx.arc(px, py, 9, 0, Math.PI * 2);
-    ocrCtx.fill();
-    ocrCtx.fillStyle = "#fff";
-    ocrCtx.textAlign = "center";
-    ocrCtx.textBaseline = "middle";
-    ocrCtx.fillText(String(d.value), px, py);
-  });
-  ocrCtx.restore();
-}
-
-// ドラッグで枠選択（画像px座標に変換して保持）
-let ocrDragging = false, ocrStart = null;
-function ocrPt(e) {
-  const rect = ocrCanvas.getBoundingClientRect();
-  const x = (e.clientX - rect.left) / OCR.scale;
-  const y = (e.clientY - rect.top) / OCR.scale;
-  return {
-    x: Math.max(0, Math.min(OCR.img.width, x)),
-    y: Math.max(0, Math.min(OCR.img.height, y))
-  };
-}
-ocrCanvas.addEventListener("pointerdown", e => {
-  if (!OCR.img) return;
-  ocrDragging = true;
-  ocrStart = ocrPt(e);
-  ocrCanvas.setPointerCapture(e.pointerId);
-  e.preventDefault();
-});
-ocrCanvas.addEventListener("pointermove", e => {
-  if (!ocrDragging) return;
-  const p = ocrPt(e);
-  OCR.crop = {
-    x: Math.min(ocrStart.x, p.x), y: Math.min(ocrStart.y, p.y),
-    w: Math.abs(p.x - ocrStart.x), h: Math.abs(p.y - ocrStart.y)
-  };
-  drawOcrCanvas();
-});
-ocrCanvas.addEventListener("pointerup", () => {
-  ocrDragging = false;
-  // 極小の枠は無効化（誤タップ対策）
-  if (OCR.crop && (OCR.crop.w < 10 || OCR.crop.h < 10)) OCR.crop = null;
-  drawOcrCanvas();
-});
-window.addEventListener("resize", layoutOcrCanvas);
-
-// Tesseract.js を必要時にCDNロード
-const TESSERACT_CDN = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js";
-function loadTesseract() {
-  if (window.Tesseract) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = TESSERACT_CDN;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error("Tesseract.jsの読み込みに失敗しました（オフライン時は使用できません）"));
-    document.head.appendChild(s);
-  });
-}
-
-// 解析対象の領域を高解像度の作業canvasに切り出す
-function ocrSourceCanvas() {
-  const c = OCR.crop || { x: 0, y: 0, w: OCR.img.width, h: OCR.img.height };
-  // OCR精度のため長辺1600px程度に拡大
-  const target = 1600;
-  const k = Math.min(3, Math.max(1, target / Math.max(c.w, c.h)));
-  const cv = document.createElement("canvas");
-  cv.width = Math.round(c.w * k);
-  cv.height = Math.round(c.h * k);
-  const cx = cv.getContext("2d");
-  cx.imageSmoothingEnabled = true;
-  cx.drawImage(OCR.img, c.x, c.y, c.w, c.h, 0, 0, cv.width, cv.height);
-  // 簡易2値化でコントラストを上げる
-  const id = cx.getImageData(0, 0, cv.width, cv.height);
-  const d = id.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-    const v = g < 140 ? 0 : 255;
-    d[i] = d[i + 1] = d[i + 2] = v;
-  }
-  cx.putImageData(id, 0, 0);
-  return { cv, region: c, k };
-}
-
-ocrRunBtn.addEventListener("click", async () => {
-  if (!OCR.img) return;
-  ocrRunBtn.disabled = true;
-  ocrApplyBtn.disabled = true;
-  OCR.detected = [];
-  try {
-    ocrProg.textContent = "OCRエンジンを準備中…（初回はダウンロードに時間がかかります）";
-    await loadTesseract();
-    const { cv, region, k } = ocrSourceCanvas();
-    ocrProg.textContent = "解析中…";
-    const { data } = await window.Tesseract.recognize(cv, "eng", {
-      logger: m => {
-        if (m.status === "recognizing text") {
-          ocrProg.textContent = "解析中… " + Math.round(m.progress * 100) + "%";
-        }
-      },
-      tessedit_char_whitelist: "0123456789",
-      tessedit_pageseg_mode: "11"   // sparse text
-    });
-    // 単語を数値として取り出し、画像px座標の中心へ変換
-    const words = (data.words || []).filter(w => /^\d{1,2}$/.test((w.text || "").trim()));
-    OCR.detected = words.map(w => {
-      const b = w.bbox; // 作業canvas座標
-      const cxWork = (b.x0 + b.x1) / 2, cyWork = (b.y0 + b.y1) / 2;
-      return {
-        value: Math.max(0, Math.min(DB_MAX, parseInt(w.text.trim(), 10))),
-        cx: region.x + cxWork / k,   // 元画像px
-        cy: region.y + cyWork / k
-      };
-    });
-    drawOcrCanvas();
-    if (OCR.detected.length === 0) {
-      ocrProg.textContent = "数値を検出できませんでした。枠選択を数値プロットに合わせる、明るい画像を使うなどをお試しください。";
-      ocrRunBtn.disabled = false;
-      return;
-    }
-    OCR.ready = true;
-    ocrApplyBtn.disabled = false;
-    ocrRunBtn.disabled = false;
-    ocrProg.textContent = OCR.detected.length + "個の数値を検出しました。青い丸が読み取り位置です。問題なければ「①入力タブに反映して確認」を押してください。";
-  } catch (err) {
-    ocrProg.textContent = "エラー: " + (err && err.message ? err.message : err);
-    ocrRunBtn.disabled = false;
-  }
-});
-
-// 検出結果を76点へマッピング（クロップ範囲内で正規化 → 最近傍点へ割当）
-function mapDetectedToPoints() {
-  // 検出点の範囲（bounding box）で正規化。視野±27度に対応させる
-  const EXT = 27;
-  const xs = OCR.detected.map(d => d.cx), ys = OCR.detected.map(d => d.cy);
-  const minX = Math.min(...xs), maxX = Math.max(...xs);
-  const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const spanX = Math.max(1, maxX - minX), spanY = Math.max(1, maxY - minY);
-
-  const assigned = new Array(N_POINTS).fill(null);
-  const assignedDist = new Array(N_POINTS).fill(Infinity);
-  OCR.detected.forEach(d => {
-    const nx = (d.cx - minX) / spanX;          // 0..1（左→右）
-    const ny = (d.cy - minY) / spanY;          // 0..1（上→下）
-    const xDeg = (nx - 0.5) * 2 * EXT;
-    const yDeg = (0.5 - ny) * 2 * EXT;          // 上が正
-    // 最近傍の測定点
-    let best = -1, bestD = Infinity;
-    for (let k = 0; k < N_POINTS; k++) {
-      const dd = (xDeg - STANDARD_POINTS[k][0]) ** 2 + (yDeg - STANDARD_POINTS[k][1]) ** 2;
-      if (dd < bestD) { bestD = dd; best = k; }
-    }
-    if (bestD < assignedDist[best]) { assigned[best] = d.value; assignedDist[best] = bestD; }
-  });
-
-  // 未割当の点は最近傍の割当済み点の値で補完（穴を作らない）
-  const out = new Array(N_POINTS);
-  let nAssigned = 0;
-  for (let k = 0; k < N_POINTS; k++) {
-    if (assigned[k] !== null) { out[k] = assigned[k]; nAssigned++; continue; }
-    let best = -1, bestD = Infinity;
-    for (let j = 0; j < N_POINTS; j++) {
-      if (assigned[j] === null) continue;
-      const dd = (STANDARD_POINTS[k][0] - STANDARD_POINTS[j][0]) ** 2 +
-                 (STANDARD_POINTS[k][1] - STANDARD_POINTS[j][1]) ** 2;
-      if (dd < bestD) { bestD = dd; best = j; }
-    }
-    out[k] = best >= 0 ? assigned[best] : 30;
-  }
-  return { out, nAssigned };
-}
-
-ocrApplyBtn.addEventListener("click", () => {
-  if (!OCR.ready || OCR.detected.length === 0) return;
-  const { out, nAssigned } = mapDetectedToPoints();
-  eyeData[OCR.eye] = out.map(v => Math.max(0, Math.min(DB_MAX, v)));
-  // 入力タブを反映先の眼に切り替えて表示
-  currentEye = OCR.eye;
-  dbValues = eyeData[currentEye];
-  document.querySelectorAll("#eyeTabs button")
-    .forEach(b => b.classList.toggle("active", b.dataset.eye === currentEye));
-  refreshFieldSvg();
-  onDataChanged();
-  // ①入力タブへ移動
-  switchTab("navInput");
-  ocrProg.textContent = `反映しました（${nAssigned}点を直接割当、残りは最近傍補完）。①入力タブで値を確認・修正してください。`;
-});
-
-/* =========================================================
  * タブ切替
  * ======================================================= */
 const tabs = {
   navInput:  "tabInput",
-  navCamera: "tabCamera",
-  navOcr:    "tabOcr"
+  navCamera: "tabCamera"
 };
 function switchTab(navId) {
   document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
@@ -1346,7 +1016,6 @@ function switchTab(navId) {
     stopCamera();
     camStatus.textContent = "タブ移動のため停止しました";
   }
-  if (navId === "navOcr" && OCR.img) layoutOcrCanvas();
 }
 Object.keys(tabs).forEach(navId => {
   document.getElementById(navId).addEventListener("click", () => switchTab(navId));
