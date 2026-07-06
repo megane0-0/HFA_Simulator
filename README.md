@@ -116,4 +116,4 @@ python3 -m http.server 8000
 
 ## ライセンス
 
-[MIT License](LICENSE)
+[MIT License](LICENSE.txt)
