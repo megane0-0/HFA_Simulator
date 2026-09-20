@@ -1,6 +1,5 @@
-[README.md](https://github.com/user-attachments/files/32429501/README.md)
 作成日: 20260702
-最終更新日: 20260917
+最終更新日: 20260920
 
 # 視野検査シミュレーター Web版
 
@@ -122,6 +121,14 @@ python3 -m http.server 8000
 
 - Chrome / Edge / Safari 18以降 推奨（Safari 17以前はブラー近似表示）
 - カメラ機能はHTTPSまたはlocalhostでのみ動作
+
+## 開発
+
+単一の `index.html` だけで動作します。ビルド手順やパッケージマネージャは使っていません。編集したファイルをブラウザで開けばそのまま動きます。
+
+設計の意図や実装の要点、変更時の確認手順は [CLAUDE.md](CLAUDE.md) にまとめてあります。`levelForDb` の境界、IDW補間の設計、レベル別フィルターの考え方、緑内障プリセットの作り方などを変更する前に目を通してください。
+
+`main` は GitHub Pages で公開されているため、変更は作業用ブランチで行い、Pull Request 経由でマージしています。
 
 ## 免責事項
 
