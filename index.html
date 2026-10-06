@@ -223,18 +223,23 @@
         <select id="presetSelect">
           <option value="">プリセットを選択…</option>
           <option value="normal">正常視野</option>
-          <option value="constriction">求心性視野狭窄</option>
-          <option value="central">中心暗点</option>
+          <option value="constriction">網膜色素変性（求心性視野狭窄）</option>
+          <option value="central">黄斑変性（中心暗点）</option>
           <option value="superior">上半視野欠損</option>
+          <optgroup label="脳梗塞（同名半盲・両眼とも同じ側が欠ける）">
+            <option value="hemianopiaRight">右同名半盲</option>
+            <option value="hemianopiaLeft">左同名半盲</option>
+          </optgroup>
           <optgroup label="緑内障（上方から進行する典型例）">
             <option value="glaucomaEarly">緑内障 初期（MD 約−2dB）</option>
             <option value="glaucomaModerate">緑内障 中期（MD 約−7dB）</option>
             <option value="glaucomaAdvanced">緑内障 後期（MD 約−18dB）</option>
           </optgroup>
         </select>
-        <button class="btn secondary" id="applyPreset">適用（この眼）</button>
+        <button class="btn secondary" id="applyPreset">この眼に適用</button>
+        <button class="btn secondary" id="applyPresetBoth">両眼に適用</button>
       </div>
-      <p class="hint">緑内障プリセットは右眼の例を左眼では左右反転して入力します（鼻側・耳側の向きを保つため、両眼に入れるときは「コピー」ではなく眼ごとに適用してください）。カメラの「両眼」表示では、もう片方の眼に補われて欠損が目立たないことがあります。</p>
+      <p class="hint">「両眼に適用」は左右それぞれに向きを合わせて入れます（緑内障は左眼で左右反転、同名半盲は両眼とも同じ側）。片眼だけの欠損を示したいときは「この眼に適用」を使ってください。なお「コピー」は反転しないため、緑内障を両眼に入れる用途には使えません。カメラの「両眼」表示では、もう片方の眼の感度が良い点に補われるため、片眼だけの欠損は目立ちません。</p>
       <div class="toolbar">
         <button class="btn secondary" id="copyEyeBtn">この眼をもう一方へコピー</button>
         <button class="btn danger" id="clearBtn">この眼をリセット</button>
@@ -713,16 +718,44 @@ const PRESETS = {
     return r <= 9 ? 0 : (r <= 16 ? 10 : 30);
   },
   superior: (x, y) => (y > 0 ? 0 : 30),
+  // 同名半盲は両眼とも視野の同じ側が欠ける（右同名半盲なら両眼とも右半分）。
+  // 緑内障と違い eye で反転してはいけない。「コピー」がそのまま使える唯一のプリセット。
+  // 30-2 に x=0 の点はないため、垂直経線上で値が割れることはない。
+  hemianopiaRight: (x, y) => (x > 0 ? 0 : 30),
+  hemianopiaLeft:  (x, y) => (x < 0 ? 0 : 30),
   glaucomaEarly:    glaucomaPreset("early"),
   glaucomaModerate: glaucomaPreset("moderate"),
   glaucomaAdvanced: glaucomaPreset("advanced")
 };
 
-document.getElementById("applyPreset").addEventListener("click", () => {
+// プリセットを指定した眼へ適用する。配列は作り直さず中身を書き換える
+// （dbValues が eyeData[currentEye] を参照しているため、作り直すと参照が切れる）
+function applyPresetToEye(key, eye) {
+  const arr = eyeData[eye];
+  STANDARD_POINTS.forEach((p, i) => { arr[i] = PRESETS[key](p[0], p[1], eye); });
+}
+
+function selectedPreset() {
   const key = document.getElementById("presetSelect").value;
-  if (!key || !PRESETS[key]) return;
-  eyeData[currentEye] = STANDARD_POINTS.map(p => PRESETS[key](p[0], p[1], currentEye));
-  dbValues = eyeData[currentEye];
+  return (key && PRESETS[key]) ? key : null;
+}
+
+document.getElementById("applyPreset").addEventListener("click", () => {
+  const key = selectedPreset();
+  if (!key) return;
+  applyPresetToEye(key, currentEye);
+  refreshFieldSvg();
+  onDataChanged();
+});
+
+// 両眼へ一度に適用する。眼ごとに PRESETS を呼ぶので、緑内障は左眼で左右反転し、
+// 同名半盲など eye を見ないプリセットは両眼とも同じ値になる。
+// 「コピー」（反転しない複製）とは別物なので注意。
+document.getElementById("applyPresetBoth").addEventListener("click", () => {
+  const key = selectedPreset();
+  if (!key) return;
+  applyPresetToEye(key, "od");
+  applyPresetToEye(key, "os");
   refreshFieldSvg();
   onDataChanged();
 });
