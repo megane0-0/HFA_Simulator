@@ -236,9 +236,10 @@
             <option value="glaucomaAdvanced">緑内障 後期（MD 約−18dB）</option>
           </optgroup>
         </select>
-        <button class="btn secondary" id="applyPreset">適用（この眼）</button>
+        <button class="btn secondary" id="applyPreset">この眼に適用</button>
+        <button class="btn secondary" id="applyPresetBoth">両眼に適用</button>
       </div>
-      <p class="hint">プリセットは選択中の眼だけに適用されます。緑内障は右眼の例を左眼では左右反転して入力するため（鼻側・耳側の向きを保つため）、両眼に入れるときは「コピー」ではなく眼ごとに適用してください。同名半盲は両眼とも同じ側が欠けるので「コピー」が使えます。カメラの「両眼」表示では、もう片方の眼の感度が良い点に補われるため、片眼だけの欠損は目立ちません。</p>
+      <p class="hint">「両眼に適用」は左右それぞれに向きを合わせて入れます（緑内障は左眼で左右反転、同名半盲は両眼とも同じ側）。片眼だけの欠損を示したいときは「この眼に適用」を使ってください。なお「コピー」は反転しないため、緑内障を両眼に入れる用途には使えません。カメラの「両眼」表示では、もう片方の眼の感度が良い点に補われるため、片眼だけの欠損は目立ちません。</p>
       <div class="toolbar">
         <button class="btn secondary" id="copyEyeBtn">この眼をもう一方へコピー</button>
         <button class="btn danger" id="clearBtn">この眼をリセット</button>
@@ -727,11 +728,34 @@ const PRESETS = {
   glaucomaAdvanced: glaucomaPreset("advanced")
 };
 
-document.getElementById("applyPreset").addEventListener("click", () => {
+// プリセットを指定した眼へ適用する。配列は作り直さず中身を書き換える
+// （dbValues が eyeData[currentEye] を参照しているため、作り直すと参照が切れる）
+function applyPresetToEye(key, eye) {
+  const arr = eyeData[eye];
+  STANDARD_POINTS.forEach((p, i) => { arr[i] = PRESETS[key](p[0], p[1], eye); });
+}
+
+function selectedPreset() {
   const key = document.getElementById("presetSelect").value;
-  if (!key || !PRESETS[key]) return;
-  eyeData[currentEye] = STANDARD_POINTS.map(p => PRESETS[key](p[0], p[1], currentEye));
-  dbValues = eyeData[currentEye];
+  return (key && PRESETS[key]) ? key : null;
+}
+
+document.getElementById("applyPreset").addEventListener("click", () => {
+  const key = selectedPreset();
+  if (!key) return;
+  applyPresetToEye(key, currentEye);
+  refreshFieldSvg();
+  onDataChanged();
+});
+
+// 両眼へ一度に適用する。眼ごとに PRESETS を呼ぶので、緑内障は左眼で左右反転し、
+// 同名半盲など eye を見ないプリセットは両眼とも同じ値になる。
+// 「コピー」（反転しない複製）とは別物なので注意。
+document.getElementById("applyPresetBoth").addEventListener("click", () => {
+  const key = selectedPreset();
+  if (!key) return;
+  applyPresetToEye(key, "od");
+  applyPresetToEye(key, "os");
   refreshFieldSvg();
   onDataChanged();
 });
