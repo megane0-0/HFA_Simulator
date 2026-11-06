@@ -164,13 +164,22 @@
   }
   footer strong { color: #b71c1c; }
   .hint { font-size: 0.8rem; color: #666; margin-top: 6px; }
+  .notice {
+    font-size: 0.85rem;
+    background: #e8f0fb;
+    border-left: 4px solid var(--accent);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-top: 10px;
+    color: #333;
+  }
 </style>
 </head>
 <body>
 
 <header>
   <h1>視野検査シミュレーター</h1>
-  <p>ハンフリー自動視野計 30-2（76点）対応・Web版</p>
+  <p>ハンフリー自動視野計 30-2（76点）・24-2（54点）対応・Web版</p>
 </header>
 
 <nav>
@@ -189,6 +198,15 @@
 <main>
   <!-- ===== 入力タブ ===== -->
   <section id="tabInput" class="active">
+    <div class="card">
+      <h2>検査プログラム</h2>
+      <div class="eyetabs" id="protocolTabs">
+        <button data-protocol="30-2" class="active">30-2（76点）</button>
+        <button data-protocol="24-2">24-2（54点）</button>
+      </div>
+      <p class="hint">24-2 では、30-2 にしかない外周の点を灰色で表示し、入力とシミュレーションから外します。24-2 の測定範囲（おおむね24°）より外側は、外周の測定点の値を延長して表示します。鼻側の2点（27°）は右眼と左眼で位置が左右逆になります。</p>
+    </div>
+
     <div class="card">
       <h2>入力する眼を選択</h2>
       <div class="eyetabs" id="eyeTabs">
@@ -213,6 +231,12 @@
         <button class="btn secondary" id="dbPaintBtn">この値で塗る</button>
       </div>
       <p class="hint">点をタップまたはドラッグ（なぞる）で、選択中のレベル（またはdB値）を適用します。検査結果のdB値をそのまま入力したい場合は「この値で塗る」を選んでください。</p>
+      <div class="dbrow">
+        <label for="foveaInput" style="font-size:0.85rem; font-weight:600;">中心窩 dB（任意）:</label>
+        <input type="number" id="foveaInput" min="0" max="40" step="1" placeholder="自動" inputmode="numeric">
+        <button class="btn secondary" id="foveaClearBtn">自動に戻す</button>
+      </div>
+      <p class="hint">検査結果の「FOVEA」（中心窩閾値）を入れると、視野の中心（直径約1.5°）をその値で表示します。空欄（自動）のときは、中心に最も近い4点の平均を使います。緑内障では周りの点が下がっていても中心窩は保たれていることが多く、入力しないと中心まで見えにくく表示されます。眼ごとに保存され、プリセットの適用とリセットで自動に戻ります。</p>
     </div>
 
     <div class="card">
@@ -287,6 +311,7 @@
         </select>
       </div>
       <p class="hint">上のボタンで表示する眼を切り替えられます。「両眼」では各測定点で左右の感度が良い方（better eye）を採用した両眼視モデルになります。シミュレーション円は視野半径30度に対応します。画角設定を実際のカメラに合わせると、円の大きさが実際の視野角と一致します。円の外側（視野30度超）は黒く表示されます。</p>
+      <p class="notice">この映像は、<strong>視線を画面の中心に止めた瞬間</strong>の見え方です。実際には目を動かして見えにくい部分を補っており、長く付き合っている欠損ほど、その補い方が身についています。そのため日常の見え方は、この表示より良いことが多いです。また、欠損そのものは本人に「見えない部分」として自覚されにくく、周りの景色で埋められて気づかないこともあります。</p>
       <p id="camStatus">「カメラ開始」を押してください（ブラウザのカメラ許可が必要です）</p>
     </div>
   </section>
@@ -296,6 +321,7 @@
   <strong>【重要】本アプリは医療機器ではありません。</strong>
   視野欠損の見え方を家族・支援者に伝えるための理解促進・教育目的のツールであり、
   診断・治療の根拠として使用することはできません。実際の見え方には個人差があります。
+  表示は視線を固定した状態を想定しており、目の動きによる補い（代償）は含みません。
   入力されたデータは端末内（ブラウザ）でのみ処理され、外部には送信されません。
 </footer>
 
@@ -353,7 +379,11 @@ const FIELD_DEG = 30;          // シミュレーション円 = 半径30度
 const K_NEAREST = 4;           // IDWで使う近傍点数。全点を使うと遠方の正常点に
                                // 引っ張られて暗点内部が明るくなり、測定点直上だけ
                                // 暗い「まだら」になるため近傍4点に限定する
+const FOVEA_PLATEAU = 0.75;     // 中心窩パッチ: この偏心度(度)までは中心窩の値で一定
+const FOVEA_EDGE    = 1.65;     // ここまでcos²で周囲の補間値へ移行（de Boer et al. 2026 に準拠）
 const STORAGE_KEY = "hfa-sim-data-v2";   // {od:[76], os:[76]}
+const FOVEA_KEY   = "hfa-sim-fovea-v1";  // {od: dB|null, os: dB|null}（null=自動）
+const PROTOCOL_KEY = "hfa-sim-protocol-v1"; // "30-2" | "24-2"
 const LEGACY_KEY  = "hfa-sim-data-v1";   // 旧形式: 単一配列（両眼まとめて入力）
 const DB_MAX = 40;
 
@@ -371,11 +401,28 @@ function levelForDb(db) {
  * 状態
  * ======================================================= */
 const N_POINTS = STANDARD_POINTS.length;
+
+// 24-2（54点）に含まれる点か。30-2の76点の部分集合で、
+// |y|=21: |x|≤9 / |y|=15: |x|≤15 / |y|=9,3: |x|≤21、加えて鼻側の(∓27, ±3)の2点。
+// 鼻側は右眼で x<0、左眼で x>0（表は患者から見た向き）。
+function in24_2(x, y, eye) {
+  const ay = Math.abs(y), ax = Math.abs(x);
+  const xMax = { 3: 21, 9: 21, 15: 15, 21: 9 }[ay];
+  if (xMax !== undefined && ax <= xMax) return true;
+  return ay === 3 && x === (eye === "os" ? 27 : -27);
+}
 // 左右眼別の視野データ（右眼=OD, 左眼=OS）。全点正常で初期化
 let eyeData = {
   od: new Array(N_POINTS).fill(30),
   os: new Array(N_POINTS).fill(30)
 };
+// 中心窩閾値（任意入力）。null＝自動（最内4点の平均）
+let foveaDb = { od: null, os: null };
+// 検査プログラム（両眼共通）
+let protocol = "30-2";
+try {
+  if (localStorage.getItem(PROTOCOL_KEY) === "24-2") protocol = "24-2";
+} catch (e) {}
 let currentEye = "od";
 let dbValues = eyeData.od;  // 表示・編集中の眼の配列（eyeData[currentEye]への参照）
 // 塗りモード: レベル選択 or dB値直接入力
@@ -394,12 +441,36 @@ try {
 
 const SIM_EYE_LABEL = { od: "右眼（OD）", os: "左眼（OS）", both: "両眼重ね合わせ" };
 
-// シミュレーションに使うdB値
+// 点iがその眼の検査プログラムで測定される点か
+function isMeasured(i, eye) {
+  if (protocol === "30-2") return true;
+  return in24_2(STANDARD_POINTS[i][0], STANDARD_POINTS[i][1], eye);
+}
+
+// シミュレーションに使うdB値。測定しない点は null（補間から外す）
 // 両眼: 各点で感度の良い方（better eye = dB値の大きい方）を採用する両眼視モデル
+// 24-2の鼻側2点は片眼でしか測定しないので、測定した眼の値をそのまま使う
 function simDb(i) {
-  if (simEye === "od") return eyeData.od[i];
-  if (simEye === "os") return eyeData.os[i];
-  return Math.max(eyeData.od[i], eyeData.os[i]);
+  const eyes = simEye === "both" ? ["od", "os"] : [simEye];
+  let v = null;
+  for (const e of eyes) {
+    if (isMeasured(i, e)) v = (v === null) ? eyeData[e][i] : Math.max(v, eyeData[e][i]);
+  }
+  return v;
+}
+
+// その眼の中心窩の値（未入力なら最内4点(±3,±3)の平均）
+function eyeFovea(eye) {
+  if (foveaDb[eye] !== null) return foveaDb[eye];
+  const a = eyeData[eye];
+  return (a[0] + a[1] + a[2] + a[3]) / 4;
+}
+
+// シミュレーションに使う中心窩の値。どの眼も未入力なら null（パッチを置かない）
+function simFovea() {
+  const eyes = simEye === "both" ? ["od", "os"] : [simEye];
+  if (eyes.every(e => foveaDb[e] === null)) return null;
+  return Math.max(...eyes.map(eyeFovea));
 }
 
 /* =========================================================
@@ -408,21 +479,31 @@ function simDb(i) {
  * 30-2（24-2も同様）は中心(0,0)に測定点がないため、最内4点(±3,±3)の平均値を
  * 持つ仮想中心点を追加する。これにより中心暗点で最内4点の内側が
  * 面として暗くなる（従来は測定点直上だけ暗い「まだら」だった）。
+ *
+ * 24-2では測定しない点を補間から外す。24°より外側は近傍の外周点で外挿される。
+ *
+ * 中心窩閾値が入力されていれば、補間後に中心窩パッチを重ねる
+ * （de Boer et al., J Vis 2026: 半径0.75°まで中心窩の値、1.65°までcos²で移行）。
+ * 仮想中心点は最内4点の平均のまま変えない。中心窩の値を仮想中心点にすると
+ * 傍中心の欠損まで明るく引っ張られるため、パッチは中心の小さな範囲に限る。
  * ======================================================= */
 function computeGrid() {
   const g = new Float32Array(GRID_SIZE * GRID_SIZE);
 
   // 補間用の点群 = 仮想中心点 + 76測定点
   // STANDARD_POINTSの先頭4点は(3,3),(3,-3),(-3,3),(-3,-3)
+  // 最内4点は30-2・24-2とも必ず測定する
   const centerDb = (simDb(0) + simDb(1) + simDb(2) + simDb(3)) / 4;
-  const n = N_POINTS + 1;
-  const xs = new Float32Array(n), ys = new Float32Array(n), vs = new Float32Array(n);
-  xs[0] = 0; ys[0] = 0; vs[0] = centerDb;
+  const xs = [0], ys = [0], vs = [centerDb];
   for (let k = 0; k < N_POINTS; k++) {
-    xs[k + 1] = STANDARD_POINTS[k][0];
-    ys[k + 1] = STANDARD_POINTS[k][1];
-    vs[k + 1] = simDb(k);
+    const v = simDb(k);
+    if (v === null) continue;
+    xs.push(STANDARD_POINTS[k][0]);
+    ys.push(STANDARD_POINTS[k][1]);
+    vs.push(v);
   }
+  const n = vs.length;
+  const fovea = simFovea();
 
   const bw = new Float32Array(K_NEAREST);  // 上位K件の重み
   const bv = new Float32Array(K_NEAREST);  // 対応するdB値
@@ -448,10 +529,25 @@ function computeGrid() {
           bw[j] = w; bv[j] = vs[k];
         }
       }
-      if (exact >= 0) { g[r * GRID_SIZE + c] = vs[exact]; continue; }
-      let wSum = 0, vSum = 0;
-      for (let j = 0; j < K_NEAREST; j++) { wSum += bw[j]; vSum += bw[j] * bv[j]; }
-      g[r * GRID_SIZE + c] = wSum > 0 ? vSum / wSum : 25;
+      let val;
+      if (exact >= 0) {
+        val = vs[exact];
+      } else {
+        let wSum = 0, vSum = 0;
+        for (let j = 0; j < K_NEAREST; j++) { wSum += bw[j]; vSum += bw[j] * bv[j]; }
+        val = wSum > 0 ? vSum / wSum : 25;
+      }
+      if (fovea !== null) {
+        const ecc = Math.hypot(xDeg, yDeg);
+        if (ecc <= FOVEA_PLATEAU) {
+          val = fovea;
+        } else if (ecc < FOVEA_EDGE) {
+          const t = (ecc - FOVEA_PLATEAU) / (FOVEA_EDGE - FOVEA_PLATEAU);
+          const w = Math.cos(t * Math.PI / 2) ** 2;
+          val = w * fovea + (1 - w) * val;
+        }
+      }
+      g[r * GRID_SIZE + c] = val;
     }
   }
   gridMap = g;
@@ -514,22 +610,32 @@ function buildFieldSvg() {
 }
 
 function refreshFieldSvg() {
-  dbValues.forEach((db, i) => {
-    const lv = levelForDb(db);
-    pointEls[i].circ.setAttribute("fill", LEVEL_COLORS[lv]);
-    pointEls[i].txt.textContent = Math.round(db);
-    pointEls[i].txt.setAttribute("fill", lv === 1 ? "#222" : "#fff");
-  });
+  dbValues.forEach((db, i) => drawPoint(i));
+  foveaInput.value = foveaDb[currentEye] === null ? "" : String(foveaDb[currentEye]);
+}
+
+// 1点の表示を更新する。測定しない点（24-2の外周）は灰色の小円にして値を出さない
+function drawPoint(i) {
+  const { circ, txt } = pointEls[i];
+  if (!isMeasured(i, currentEye)) {
+    circ.setAttribute("fill", "#e0e0e0");
+    circ.setAttribute("r", 6);
+    txt.textContent = "";
+    return;
+  }
+  const lv = levelForDb(dbValues[i]);
+  circ.setAttribute("r", 11);
+  circ.setAttribute("fill", LEVEL_COLORS[lv]);
+  txt.textContent = Math.round(dbValues[i]);
+  txt.setAttribute("fill", lv === 1 ? "#222" : "#fff");
 }
 
 function setPoint(i, db) {
   db = Math.max(0, Math.min(DB_MAX, db));
+  if (!isMeasured(i, currentEye)) return;   // 24-2で測定しない点は塗らない
   if (dbValues[i] === db) return;
   dbValues[i] = db;
-  const lv = levelForDb(db);
-  pointEls[i].circ.setAttribute("fill", LEVEL_COLORS[lv]);
-  pointEls[i].txt.textContent = Math.round(db);
-  pointEls[i].txt.setAttribute("fill", lv === 1 ? "#222" : "#fff");
+  drawPoint(i);
   onDataChanged();
 }
 
@@ -591,6 +697,36 @@ dbInput.addEventListener("input", () => {
   if (paintMode.type === "db") paintMode.value = currentInputDb();
 });
 
+// 中心窩閾値（任意）。空欄＝自動
+const foveaInput = document.getElementById("foveaInput");
+foveaInput.addEventListener("change", () => {
+  const v = parseFloat(foveaInput.value);
+  foveaDb[currentEye] = isNaN(v) ? null : Math.max(0, Math.min(DB_MAX, v));
+  foveaInput.value = foveaDb[currentEye] === null ? "" : String(foveaDb[currentEye]);
+  onDataChanged();
+});
+document.getElementById("foveaClearBtn").addEventListener("click", () => {
+  foveaDb[currentEye] = null;
+  foveaInput.value = "";
+  onDataChanged();
+});
+
+// 検査プログラム切替（30-2 / 24-2）。保存データ(76点)はそのまま残し、表示と補間だけ変える
+function updateProtocolTabs() {
+  document.querySelectorAll("#protocolTabs button")
+    .forEach(b => b.classList.toggle("active", b.dataset.protocol === protocol));
+}
+document.querySelectorAll("#protocolTabs button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.protocol === protocol) return;
+    protocol = btn.dataset.protocol;
+    try { localStorage.setItem(PROTOCOL_KEY, protocol); } catch (e) {}
+    updateProtocolTabs();
+    refreshFieldSvg();
+    onDataChanged();
+  });
+});
+
 // 左右眼タブ切替
 document.querySelectorAll("#eyeTabs button").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -607,6 +743,7 @@ document.querySelectorAll("#eyeTabs button").forEach(btn => {
 document.getElementById("copyEyeBtn").addEventListener("click", () => {
   const other = (currentEye === "od") ? "os" : "od";
   eyeData[other] = dbValues.slice();
+  foveaDb[other] = foveaDb[currentEye];
   onDataChanged();
 });
 
@@ -744,6 +881,7 @@ document.getElementById("applyPreset").addEventListener("click", () => {
   const key = selectedPreset();
   if (!key) return;
   applyPresetToEye(key, currentEye);
+  foveaDb[currentEye] = null;
   refreshFieldSvg();
   onDataChanged();
 });
@@ -756,12 +894,14 @@ document.getElementById("applyPresetBoth").addEventListener("click", () => {
   if (!key) return;
   applyPresetToEye(key, "od");
   applyPresetToEye(key, "os");
+  foveaDb.od = foveaDb.os = null;
   refreshFieldSvg();
   onDataChanged();
 });
 
 document.getElementById("clearBtn").addEventListener("click", () => {
   dbValues.fill(30);
+  foveaDb[currentEye] = null;
   refreshFieldSvg();
   onDataChanged();
 });
@@ -769,6 +909,7 @@ document.getElementById("clearBtn").addEventListener("click", () => {
 document.getElementById("clearAllBtn").addEventListener("click", () => {
   eyeData.od.fill(30);
   eyeData.os.fill(30);
+  foveaDb.od = foveaDb.os = null;
   refreshFieldSvg();
   onDataChanged();
 });
@@ -781,6 +922,7 @@ function onDataChanged() {
   gridDirty = true;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ od: eyeData.od, os: eyeData.os }));
+    localStorage.setItem(FOVEA_KEY, JSON.stringify(foveaDb));
   } catch (e) {}
   // 連続ドラッグ中の再計算を間引く
   clearTimeout(previewTimer);
@@ -789,6 +931,15 @@ function onDataChanged() {
 
 function loadSaved() {
   const clampArr = a => a.map(v => Math.max(0, Math.min(DB_MAX, Number(v) || 0)));
+  try {
+    const f = JSON.parse(localStorage.getItem(FOVEA_KEY) || "null");
+    if (f) {
+      for (const e of ["od", "os"]) {
+        const v = f[e];
+        foveaDb[e] = (typeof v === "number" && isFinite(v)) ? Math.max(0, Math.min(DB_MAX, v)) : null;
+      }
+    }
+  } catch (e) {}
   try {
     // 新形式（v2: 左右眼別）
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -1123,6 +1274,7 @@ document.addEventListener("visibilitychange", () => {
  * 初期化
  * ======================================================= */
 loadSaved();
+updateProtocolTabs();
 buildFieldSvg();
 updateSimEyeTabs();
 updatePreviewTitle();
