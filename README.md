@@ -1,5 +1,5 @@
 作成日: 20260702
-最終更新日: 20261006
+最終更新日: 20261116
 
 # 視野検査シミュレーター Web版
 
@@ -140,6 +140,10 @@ python3 -m http.server 8000
 
 - Chrome / Edge / Safari 18以降 推奨（Safari 17以前はブラー近似表示）
 - カメラ機能はHTTPSまたはlocalhostでのみ動作
+
+## VIVE Focus Vision 版（別プログラム）
+
+VIVE Focus Vision のパススルー映像（ゴーグルのカメラで見る実際の周囲）に、左右の眼それぞれの視野欠損を重ねて体験する Unity 用プログラムを [vive-focus/](vive-focus/) に置いています。内蔵のアイトラッカーで欠損が視線に追従し、ゴーグルの中で視野データの入力もできます。Web版とは別のプログラムで、実機での動作はまだ確認していません。詳しくは [vive-focus/README.md](vive-focus/README.md) を見てください。
 
 ## 開発
 
