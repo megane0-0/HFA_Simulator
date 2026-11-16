@@ -34,7 +34,10 @@ public class HfaFocusGazeMouse : HfaFocusGazeSource
     }
 }
 
-// OpenXR の Eye Gaze Interaction（VIVE Focus Vision の内蔵アイトラッカー）。
+// OpenXR の Eye Gaze Interaction Profile（VIVE Focus Vision の内蔵アイトラッカー）。
+// 取り方は2通りあり、順に試す。
+//   1. XR の入力装置（InputDevices）から gazeRotation を読む
+//   2. Input System から <EyeGaze>/pose を読む（HTC の資料が案内している経路。Input System が有効なときだけ）
 // OpenXR パッケージに直接依存しないよう、機能名は文字列で指定している
 public class HfaFocusGazeOpenXr : HfaFocusGazeSource
 {
@@ -44,9 +47,34 @@ public class HfaFocusGazeOpenXr : HfaFocusGazeSource
 
     public override string Name { get { return "視線追跡"; } }
 
+#if ENABLE_INPUT_SYSTEM
+    UnityEngine.InputSystem.InputAction rotationAction, trackedAction;
+
+    bool TryInputSystem(out Quaternion rot)
+    {
+        rot = Quaternion.identity;
+        if (rotationAction == null)
+        {
+            rotationAction = new UnityEngine.InputSystem.InputAction(
+                "HfaGazeRotation", UnityEngine.InputSystem.InputActionType.Value, "<EyeGaze>/pose/rotation");
+            trackedAction = new UnityEngine.InputSystem.InputAction(
+                "HfaGazeTracked", UnityEngine.InputSystem.InputActionType.Value, "<EyeGaze>/pose/isTracked");
+            rotationAction.Enable();
+            trackedAction.Enable();
+        }
+        if (rotationAction.controls.Count == 0) return false;   // アイトラッカーの装置が見つからない
+        if (trackedAction.controls.Count > 0 && trackedAction.ReadValue<float>() < 0.5f) return false;
+        Quaternion q = rotationAction.ReadValue<Quaternion>();
+        if (q.x == 0f && q.y == 0f && q.z == 0f && q.w == 0f) return false;   // まだ値が来ていない
+        rot = q;
+        return true;
+    }
+#endif
+
     public override bool TryGetGaze(Camera head, out Vector3 dir)
     {
         dir = Vector3.forward;
+        Transform rig = head.transform.parent;   // 値はトラッキング原点基準なので、リグの回転を掛けてワールドへ
         devices.Clear();
         InputDevices.GetDevicesWithCharacteristics(InputDeviceCharacteristics.EyeTracking, devices);
         for (int i = 0; i < devices.Count; i++)
@@ -71,11 +99,17 @@ public class HfaFocusGazeOpenXr : HfaFocusGazeSource
                 }
             }
             if (!ok) continue;
-            // 値はトラッキング原点基準なので、カメラの親（リグ）の回転を掛けてワールドへ
-            Transform rig = head.transform.parent;
             dir = (rig != null ? rig.rotation : Quaternion.identity) * rot * Vector3.forward;
             return true;
         }
+#if ENABLE_INPUT_SYSTEM
+        Quaternion r2;
+        if (TryInputSystem(out r2))
+        {
+            dir = (rig != null ? rig.rotation : Quaternion.identity) * r2 * Vector3.forward;
+            return true;
+        }
+#endif
         return false;
     }
 }
