@@ -59,6 +59,7 @@ public class HfaFocusApp : MonoBehaviour
     GameObject toastBack;
     float toastUntil;
     bool mapsDirty = true, saveDirty;
+    bool passthroughStarted, wasPaused;
     float saveAt;
     Vector3 lastMouse;
 
@@ -67,8 +68,11 @@ public class HfaFocusApp : MonoBehaviour
     bool hasPointer, trigger, prevTrigger, pressOnButton;
     bool primary, prevPrimary, menu, prevMenu;
     readonly List<InputDevice> hands = new List<InputDevice>();
-    static readonly InputFeatureUsage<Vector3> PointerPosition = new InputFeatureUsage<Vector3>("pointerPosition");
-    static readonly InputFeatureUsage<Quaternion> PointerRotation = new InputFeatureUsage<Quaternion>("pointerRotation");
+    // 指す向き（aim）の姿勢。機能名の大文字・小文字が実装によって違うので両方を試す
+    static readonly InputFeatureUsage<Vector3>[] PointerPosition = {
+        new InputFeatureUsage<Vector3>("PointerPosition"), new InputFeatureUsage<Vector3>("pointerPosition") };
+    static readonly InputFeatureUsage<Quaternion>[] PointerRotation = {
+        new InputFeatureUsage<Quaternion>("PointerRotation"), new InputFeatureUsage<Quaternion>("pointerRotation") };
 
     static readonly int IdGaze = Shader.PropertyToID("_HfaGazeDir");
     static readonly int IdHeadPos = Shader.PropertyToID("_HfaHeadPos");
@@ -76,10 +80,11 @@ public class HfaFocusApp : MonoBehaviour
     static readonly int IdHeadUp = Shader.PropertyToID("_HfaHeadUp");
 
     // パススルー（カメラ映像の下敷き表示）を始める。機種・SDK ごとに派生クラスで差し替える。
-    // 戻り値は利用者に見せる一言
-    protected virtual string StartPassthrough()
+    // resumed: アプリの中断から戻ったときの呼び出し。message: 利用者に見せる一言。戻り値: 成功したか
+    protected virtual bool StartPassthrough(bool resumed, out string message)
     {
-        return "パススルーの開始処理がありません（HfaFocusVive を使ってください）";
+        message = "パススルーの開始処理がありません（HfaFocusVive を使ってください）";
+        return false;
     }
 
     void Start()
@@ -126,23 +131,27 @@ public class HfaFocusApp : MonoBehaviour
 
         lastMouse = HfaFocusInput.MousePosition;
         Application.onBeforeRender += PushPose;
-        StartCoroutine(BeginPassthrough());
+        StartCoroutine(BeginPassthrough(false));
     }
 
-    IEnumerator BeginPassthrough()
+    IEnumerator BeginPassthrough(bool resumed)
     {
         // XR の開始を待ってから要求する（早すぎると、要求は通っても映像が出ないことがある）
         float until = Time.realtimeSinceStartup + 10f;
         while (!XRSettings.isDeviceActive && Time.realtimeSinceStartup < until) yield return null;
         yield return new WaitForSecondsRealtime(0.5f);
         string msg;
-        try { msg = StartPassthrough(); }
+        bool ok;
+        try { ok = StartPassthrough(resumed, out msg); }
         catch (Exception e)
         {
+            ok = false;
             msg = "パススルーを開始できませんでした: " + e.Message;
-            Debug.LogError("[HFA] " + msg);
         }
-        Toast(msg + "\nメニューボタン（または B / Y）: 入力パネル　A / X: 欠損あり・なし", 8f);
+        if (!ok) Debug.LogError("[HFA] " + msg);
+        passthroughStarted = true;
+        if (!resumed) Toast(msg + "\nメニューボタン（または B / Y）: 入力パネル　A / X: 欠損あり・なし", 8f);
+        else if (!ok) Toast(msg, 5f);
     }
 
     void OnDestroy()
@@ -152,9 +161,19 @@ public class HfaFocusApp : MonoBehaviour
     }
 
     // Android では、ゴーグルを外したりホームに戻ったりしたまま終了されることがあるので、中断時に保存する
+    // 戻ったときは、パススルーが消えていれば始め直す（OpenXR のセッションが破棄されると消えるため）
     void OnApplicationPause(bool paused)
     {
-        if (paused && saveDirty && data != null) { HfaStore.Save(data); saveDirty = false; }
+        if (paused)
+        {
+            wasPaused = true;
+            if (saveDirty && data != null) { HfaStore.Save(data); saveDirty = false; }
+        }
+        else if (wasPaused && passthroughStarted)
+        {
+            wasPaused = false;
+            StartCoroutine(BeginPassthrough(true));
+        }
     }
 
     // ---- 設定の保存（ビルド後は Inspector で変えられないため、ゴーグル内で変えた値を覚えておく） ----
@@ -336,7 +355,10 @@ public class HfaFocusApp : MonoBehaviour
             if (hasPointer && (pointerIsRight || !right)) continue;
             Vector3 p = Vector3.zero;
             Quaternion q = Quaternion.identity;
-            bool ok = d.TryGetFeatureValue(PointerPosition, out p) && d.TryGetFeatureValue(PointerRotation, out q);
+            bool ok = false;
+            for (int k = 0; k < PointerPosition.Length && !ok; k++)
+                ok = d.TryGetFeatureValue(PointerPosition[k], out p) && d.TryGetFeatureValue(PointerRotation[k], out q);
+            // aim の姿勢がなければ、握り（grip）の姿勢で代用する
             if (!ok) ok = d.TryGetFeatureValue(CommonUsages.devicePosition, out p) &&
                           d.TryGetFeatureValue(CommonUsages.deviceRotation, out q);
             if (!ok) continue;
