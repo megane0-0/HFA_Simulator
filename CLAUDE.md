@@ -141,10 +141,10 @@ FOVE（FOVE0 / FOVE480）と HTC Vive 向けの Unity 用スクリプト一式�
 
 ## VIVE Focus Vision 版（`vive-focus/`）
 
-VIVE Focus Vision のパススルー映像に、左右の画面それぞれへその眼の視野欠損を重ねる Unity 用スクリプト一式を `vive-focus/HfaFocus/` に置いています。Web版とは別物で、**`index.html` の単一ファイル方針の対象外**です（公開ページにも影響しません）。FOVE / HTC Vive 用の VR版（PR #9 の `vr/`）とも独立していて、このフォルダだけで完結します。使い方・未確認事項・確認の手順は [vive-focus/README.md](vive-focus/README.md) にあります。
+VIVE Focus Vision のパススルー映像に、左右の画面それぞれへその眼の視野欠損を重ねる Unity 用スクリプト一式を `vive-focus/HfaFocus/` に置いています。Web版とは別物で、**`index.html` の単一ファイル方針の対象外**です（公開ページにも影響しません）。FOVE / HTC Vive 用の VR版（`vr/`）とも独立していて、このフォルダだけで完結します。使い方・未確認事項・確認の手順は [vive-focus/README.md](vive-focus/README.md) にあります。
 
 - **所有者の意向で別立てにしています。** ゴーグル用の機能を `index.html` に足さないでください（一度 WebXR のタブとして足しかけて、取り消しています）
-- `vive-focus/HfaFocus/Scripts/HfaField.cs` は、76点の並び・`levelForDb`・プリセット・`computeGrid` を `index.html` から移植したものです。**どちらかの値や式を変えたら、もう一方も必ず揃えてください**。VR版の `HfaField.cs` と中身は同じで、namespace `HfaFocus` で包んだだけです
+- `vive-focus/HfaFocus/Scripts/HfaField.cs` は、76点の並び・`levelForDb`・プリセット・`computeGrid` を `index.html` から移植したものです。**どちらかの値や式を変えたら、もう一方も必ず揃えてください**。VR版の `HfaField.cs` と中身は同じで、namespace `HfaFocus` で包んだだけです。VR版と同じく、中心窩パッチと 24-2 には未対応で、照合は Web版の既定の設定（30-2・中心窩は自動）で行います
 - **欠損は「ぼかし」ではなく灰色の霧（アルファ合成）です。** アプリからパススルー映像の画素を読む公開 API がなく、ぼかせないためです。黒塗りではありませんが、Web版の「周囲に溶かす」表現とは違うことを文書に明記しています。画素を読む手段が公開されたら、ぼかしに戻すことを検討してください
 - パススルーを始める呼び出しは資料の中でも形が2通りあるため、`HfaFocusVive.cs` の中だけに閉じ込め、Scripting Define Symbols で選ぶ形にしています
 - API やセットアップの項目名は HTC の開発者サイト（入口は https://developer.vive.com/resources/?site=jp ）で確認します。記憶で書かないでください。クラウド環境では既定で開けないので、`developer.vive.com` と `hub.vive.com` を許可した環境「HFA_Simulator」を使います。読んだページの一覧は `vive-focus/README.md` の「参照した資料」にあります
